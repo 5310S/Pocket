@@ -42,6 +42,17 @@
       </div>
     </section>
     <section>
+      <h3>Import / Export</h3>
+      <div class="row">
+        <button id="export">Export mnemonic</button>
+      </div>
+      <div class="row" style="flex-wrap:wrap; gap:8px;">
+        <input id="import-mnemonic" placeholder="Enter mnemonic to import" style="flex:1; min-width:320px;">
+        <input id="import-hrp" placeholder="HRP (pc/tpc)" value="tpc" style="width:100px;">
+        <button id="import">Import</button>
+      </div>
+    </section>
+    <section>
       <h3>Config & Payout</h3>
       <div class="row" style="flex-wrap:wrap; gap:8px;">
         <input id="rpc" placeholder="RPC (default https://127.0.0.1:8645)" style="flex:1; min-width:240px;">
@@ -99,6 +110,15 @@
     };
     document.getElementById('diff').onclick = () => {
       call('cmd_difficulty', { rpc: 'https://127.0.0.1:8645', token: null });
+    };
+    document.getElementById('export').onclick = () => {
+      call('cmd_export', { password: document.getElementById('password').value });
+    };
+    document.getElementById('import').onclick = () => {
+      const password = document.getElementById('password').value;
+      const mnemonic = document.getElementById('import-mnemonic').value;
+      const hrp = document.getElementById('import-hrp').value || 'tpc';
+      call('cmd_import', { password, mnemonic, hrp });
     };
     document.getElementById('save-config').onclick = () => {
       const rpc = document.getElementById('rpc').value || null;

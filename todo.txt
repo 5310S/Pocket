@@ -24,9 +24,9 @@ Pocket Wallet Plan (macOS focus)
 
 5) UI/UX surface (macOS)
    [x] Tauri GUI scaffold (init/show/balance)
-   [ ] Add chain status display (head height/hash/difficulty)
+   [x] Add chain status display (head/difficulty)
    [ ] Add send flow (build/sign/submit)
-   [ ] Add payout selection + export/import flows
+   [x] Add payout selection + export/import flows (UI + storage; signing still pending)
 
 6) Security & storage
    [ ] Lock/unlock flow in GUI
