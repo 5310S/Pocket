@@ -1,5 +1,5 @@
 use clap::{Parser, Subcommand};
-use pocket_lib::{addr_from_mnemonic, balance, gen_key, init_keystore, load_keystore, PocketError};
+use pocket_lib::{addr_from_mnemonic, balance, gen_key, init_keystore, load_keystore, chain_head, difficulty, PocketError};
 
 #[derive(Parser)]
 #[command(name = "pocket", version, about = "Pocket wallet for Peace/Weave")]
@@ -48,6 +48,24 @@ enum Commands {
         #[arg(long)]
         token: Option<String>,
     },
+    /// Show chain head via Lantern RPC
+    Head {
+        /// RPC base URL (default https://127.0.0.1:8645)
+        #[arg(long)]
+        rpc: Option<String>,
+        /// Bearer token for Lantern RPC
+        #[arg(long)]
+        token: Option<String>,
+    },
+    /// Show difficulty via Lantern RPC
+    Difficulty {
+        /// RPC base URL (default https://127.0.0.1:8645)
+        #[arg(long)]
+        rpc: Option<String>,
+        /// Bearer token for Lantern RPC
+        #[arg(long)]
+        token: Option<String>,
+    },
 }
 
 fn main() {
@@ -59,6 +77,8 @@ fn main() {
         Commands::Init { password, hrp } => init_keystore(&password, &hrp).map(|i| serde_json::to_string_pretty(&i).unwrap()),
         Commands::Show { password } => load_keystore(&password).map(|i| serde_json::to_string_pretty(&i).unwrap()),
         Commands::Balance { password, rpc, token } => balance(&password, rpc, token),
+        Commands::Head { rpc, token } => chain_head(rpc, token),
+        Commands::Difficulty { rpc, token } => difficulty(rpc, token),
     };
 
     match res {

@@ -11,6 +11,7 @@ use rand::rngs::OsRng;
 use rand::RngCore;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
+use reqwest::blocking::Client;
 
 #[derive(Debug, Error)]
 pub enum PocketError {
@@ -168,12 +169,36 @@ pub fn load_keystore(password: &str) -> Result<KeyInfo, PocketError> {
 pub fn balance(password: &str, rpc: Option<String>, token: Option<String>) -> Result<String, PocketError> {
     let info = load_keystore(password)?;
     let rpc_base = rpc.unwrap_or_else(|| "https://127.0.0.1:8645".to_string());
-    let url = format!("{}/getBalance", rpc_base.trim_end_matches('/'));
-    let client = reqwest::blocking::Client::builder()
+    let client = rpc_client()?;
+    let req = client
+        .post(format!("{}/getBalance", rpc_base.trim_end_matches('/')))
+        .json(&serde_json::json!({"addr": info.address}));
+    rpc_send(req, token)
+}
+
+pub fn chain_head(rpc: Option<String>, token: Option<String>) -> Result<String, PocketError> {
+    let rpc_base = rpc.unwrap_or_else(|| "https://127.0.0.1:8645".to_string());
+    let client = rpc_client()?;
+    let req = client.get(format!("{}/weave/chain/head", rpc_base.trim_end_matches('/')));
+    rpc_send(req, token)
+}
+
+pub fn difficulty(rpc: Option<String>, token: Option<String>) -> Result<String, PocketError> {
+    let rpc_base = rpc.unwrap_or_else(|| "https://127.0.0.1:8645".to_string());
+    let client = rpc_client()?;
+    let req = client.get(format!("{}/getDifficulty", rpc_base.trim_end_matches('/')));
+    rpc_send(req, token)
+}
+
+fn rpc_client() -> Result<Client, PocketError> {
+    Client::builder()
         .danger_accept_invalid_certs(true)
         .build()
-        .map_err(|e| PocketError::Rpc(e.to_string()))?;
-    let mut req = client.post(url).json(&serde_json::json!({"addr": info.address}));
+        .map_err(|e| PocketError::Rpc(e.to_string()))
+}
+
+fn rpc_send(req: reqwest::blocking::RequestBuilder, token: Option<String>) -> Result<String, PocketError> {
+    let mut req = req;
     if let Some(t) = token.or_else(|| std::env::var("LANTERN_HTTP_TOKEN").ok()) {
         req = req.bearer_auth(t);
     }
@@ -181,6 +206,5 @@ pub fn balance(password: &str, rpc: Option<String>, token: Option<String>) -> Re
     if !resp.status().is_success() {
         return Err(PocketError::Rpc(format!("http {}", resp.status())));
     }
-    let txt = resp.text().map_err(|e| PocketError::Rpc(e.to_string()))?;
-    Ok(txt)
+    resp.text().map_err(|e| PocketError::Rpc(e.to_string()))
 }

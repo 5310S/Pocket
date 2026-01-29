@@ -35,6 +35,13 @@
       </div>
     </section>
     <section>
+      <h3>Chain status</h3>
+      <div class="row">
+        <button id="head">Head</button>
+        <button id="diff">Difficulty</button>
+      </div>
+    </section>
+    <section>
       <h3>Output</h3>
       <pre id="output">(nothing yet)</pre>
     </section>
@@ -69,6 +76,12 @@
     document.getElementById('balance').onclick = () => {
       const password = document.getElementById('password').value;
       call('cmd_balance', { password, rpc: 'https://127.0.0.1:8645', token: null });
+    };
+    document.getElementById('head').onclick = () => {
+      call('cmd_head', { rpc: 'https://127.0.0.1:8645', token: null });
+    };
+    document.getElementById('diff').onclick = () => {
+      call('cmd_difficulty', { rpc: 'https://127.0.0.1:8645', token: null });
     };
   </script>
 </body>
