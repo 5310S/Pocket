@@ -1,0 +1,47 @@
+Pocket Wallet Plan
+===================
+
+1) Key & address basics
+   [x] Generate ed25519 keys from mnemonic/seed
+   [x] Bech32 encode addresses (pc/tpc)
+   [ ] Encrypted keystore (password + AES-GCM, Argon2/PBKDF2)
+   [ ] Export/import (seed phrase or raw seed + metadata)
+
+2) Chain RPC integration (via Lantern)
+   [ ] Query balance: /getBalance
+   [ ] Chain status: /weave/chain/head, /getDifficulty
+   [ ] Bearer auth handling (server-side)
+
+3) Transaction building & signing
+   [ ] Build Peace txs offline (inputs/outputs/fees)
+   [ ] Sign locally; submit via Lantern RPC
+   [ ] Validate HRP and fee sanity
+
+4) Mining payout support for Weave
+   [ ] Select/store payout address from wallet
+   [ ] Miner profile (payout address + optional attestation token)
+   [ ] Simple API/IPC for Weave to fetch payout address
+
+5) UI/UX surface (initial)
+   [ ] CLI commands: balance, send, set-payout, export, import
+   [ ] Optional local HTTP API stub for later front-end use
+
+6) Security & storage
+   [ ] Encrypted keystore file; lock/unlock flow
+   [ ] No private keys in browser; signing stays in Pocket
+   [ ] Hook for hardware keystore (future)
+
+7) Config & env
+   [ ] Network select (testnet/mainnet), RPC URL (default https://127.0.0.1:8645 via proxy)
+   [ ] Bearer token management
+   [ ] Rate-limit/backoff for RPC
+
+8) Tests & tooling
+   [ ] Unit tests: key derivation, address encoding, signing/verification
+   [ ] Integration tests against local Lantern RPC (mock or real)
+   [ ] Lint/format CI
+
+9) Packaging & deployment
+   [ ] Rust binary (pocket CLI); minimal deps
+   [ ] Example config and data-dir layout
+   [ ] Later: JS/TS SDK wrapper for Weave to talk to local Pocket service
