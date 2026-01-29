@@ -4,13 +4,13 @@ Pocket Wallet Plan
 1) Key & address basics
    [x] Generate ed25519 keys from mnemonic/seed
    [x] Bech32 encode addresses (pc/tpc)
-   [ ] Encrypted keystore (password + AES-GCM, Argon2/PBKDF2)
+   [x] Encrypted keystore (password + AES-GCM, Argon2id)
    [ ] Export/import (seed phrase or raw seed + metadata)
 
 2) Chain RPC integration (via Lantern)
-   [ ] Query balance: /getBalance
+   [x] Query balance: /getBalance
    [ ] Chain status: /weave/chain/head, /getDifficulty
-   [ ] Bearer auth handling (server-side)
+   [x] Bearer auth handling (server-side via headers/env)
 
 3) Transaction building & signing
    [ ] Build Peace txs offline (inputs/outputs/fees)
@@ -23,7 +23,7 @@ Pocket Wallet Plan
    [ ] Simple API/IPC for Weave to fetch payout address
 
 5) UI/UX surface (initial)
-   [ ] CLI commands: balance, send, set-payout, export, import
+   [x] CLI commands: balance, init, show; (send, set-payout, export/import pending)
    [ ] Optional local HTTP API stub for later front-end use
 
 6) Security & storage
