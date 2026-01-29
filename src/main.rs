@@ -1,8 +1,8 @@
 use clap::{Parser, Subcommand};
 use pocket_lib::{
     addr_from_mnemonic, balance, chain_head, difficulty, export_mnemonic, gen_key, import_mnemonic,
-    init_keystore, load_config, load_keystore, load_profile, save_config, save_profile, Config,
-    PocketError, Profile,
+    init_keystore, load_config, load_keystore, load_profile, save_config, save_profile, submit_tx,
+    Config, PocketError, Profile, TxBuildRequest, build_and_sign_transfer,
 };
 
 #[derive(Parser)]
@@ -102,9 +102,30 @@ enum Commands {
         #[arg(long)]
         token: Option<String>,
     },
+    /// Build, sign, and submit a transfer
+    Send {
+        #[arg(long)]
+        password: String,
+        #[arg(long)]
+        to: String,
+        #[arg(long)]
+        amount: u64,
+        #[arg(long, default_value_t = 1)]
+        fee: u64,
+        #[arg(long)]
+        nonce: Option<u64>,
+        #[arg(long)]
+        timestamp: Option<u64>,
+        #[arg(long)]
+        chain_id: Option<String>,
+        #[arg(long)]
+        rpc: Option<String>,
+        #[arg(long)]
+        token: Option<String>,
+    },
 }
 
-fn main() {
+fn main() -> Result<(), Box<dyn std::error::Error>> {
     let cli = Cli::parse();
     let hrp = cli.hrp.as_str();
     let res: Result<String, PocketError> = match cli.command {
@@ -121,6 +142,19 @@ fn main() {
         Commands::Balance { password, rpc, token } => balance(&password, rpc, token),
         Commands::Head { rpc, token } => chain_head(rpc, token),
         Commands::Difficulty { rpc, token } => difficulty(rpc, token),
+        Commands::Send { password, to, amount, fee, nonce, timestamp, chain_id, rpc, token } => {
+            let env = build_and_sign_transfer(&password, TxBuildRequest {
+                to,
+                amount,
+                fee,
+                nonce,
+                timestamp,
+                chain_id,
+                memo: None,
+            })?;
+            let submit = submit_tx(rpc, token, &env.tx)?;
+            Ok(serde_json::to_string_pretty(&serde_json::json!({"tx_id": env.tx_id, "submit": submit})).unwrap())
+        }
     };
 
     match res {
@@ -130,4 +164,5 @@ fn main() {
             std::process::exit(1);
         }
     }
+    Ok(())
 }

@@ -42,6 +42,22 @@
       </div>
     </section>
     <section>
+      <h3>Send</h3>
+      <div class="row" style="flex-wrap:wrap; gap:8px;">
+        <input id="send-to" placeholder="To (pc/tpc)" style="flex:1; min-width:200px;">
+        <input id="send-amt" type="number" placeholder="Amount" style="width:120px;">
+        <input id="send-fee" type="number" placeholder="Fee" value="1" style="width:100px;">
+      </div>
+      <div class="row" style="flex-wrap:wrap; gap:8px; margin-top:8px;">
+        <input id="send-nonce" type="number" placeholder="Nonce (optional)" style="width:160px;">
+        <input id="send-ts" type="number" placeholder="Timestamp (optional)" style="width:200px;">
+        <input id="send-chain" placeholder="Chain ID" value="peace-testnet" style="width:180px;">
+      </div>
+      <div class="row">
+        <button id="send-btn">Sign & Submit</button>
+      </div>
+    </section>
+    <section>
       <h3>Import / Export</h3>
       <div class="row">
         <button id="export">Export mnemonic</button>
@@ -110,6 +126,26 @@
     };
     document.getElementById('diff').onclick = () => {
       call('cmd_difficulty', { rpc: 'https://127.0.0.1:8645', token: null });
+    };
+    document.getElementById('send-btn').onclick = () => {
+      const password = document.getElementById('password').value;
+      const to = document.getElementById('send-to').value;
+      const amount = Number(document.getElementById('send-amt').value || '0');
+      const fee = Number(document.getElementById('send-fee').value || '1');
+      const nonce = document.getElementById('send-nonce').value;
+      const timestamp = document.getElementById('send-ts').value;
+      const chainId = document.getElementById('send-chain').value || null;
+      call('cmd_send', {
+        password,
+        to,
+        amount,
+        fee,
+        nonce: nonce ? Number(nonce) : null,
+        timestamp: timestamp ? Number(timestamp) : null,
+        chainId,
+        rpc: null,
+        token: null,
+      });
     };
     document.getElementById('export').onclick = () => {
       call('cmd_export', { password: document.getElementById('password').value });

@@ -7,11 +7,13 @@ use base64::{engine::general_purpose, Engine as _};
 use bech32::{encode, ToBase32, Variant};
 use bip39::{Language, Mnemonic};
 use ed25519_dalek::{SigningKey, VerifyingKey};
+use ed25519_dalek::Signer;
 use rand::rngs::OsRng;
 use rand::RngCore;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use reqwest::blocking::Client;
+use sha2::{Digest, Sha256};
 
 #[derive(Debug, Error)]
 pub enum PocketError {
@@ -57,6 +59,23 @@ pub struct Config {
 pub struct Profile {
     pub payout_address: Option<String>,
     pub attestation_token: Option<String>,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct TxEnvelope {
+    pub tx: serde_json::Value,
+    pub tx_id: String,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct TxBuildRequest {
+    pub to: String,
+    pub amount: u64,
+    pub fee: u64,
+    pub nonce: Option<u64>,
+    pub timestamp: Option<u64>,
+    pub chain_id: Option<String>,
+    pub memo: Option<String>,
 }
 
 fn hrp_valid(hrp: &str) -> bool {
@@ -285,4 +304,94 @@ fn rpc_send(req: reqwest::blocking::RequestBuilder, token: Option<String>) -> Re
         return Err(PocketError::Rpc(format!("http {}", resp.status())));
     }
     resp.text().map_err(|e| PocketError::Rpc(e.to_string()))
+}
+
+// --- Tx build/sign (offline) ---
+
+fn tx_signing_bytes(tx: &serde_json::Value) -> Result<Vec<u8>, PocketError> {
+    let mut map = tx.as_object().cloned().ok_or_else(|| PocketError::Crypto("tx not object".into()))?;
+    map.remove("signature");
+    let without_sig = serde_json::Value::Object(map);
+    serde_json::to_vec(&without_sig).map_err(|e| PocketError::Crypto(e.to_string()))
+}
+
+fn tx_id_bytes(tx: &serde_json::Value) -> Result<[u8; 32], PocketError> {
+    let bytes = serde_json::to_vec(tx).map_err(|e| PocketError::Crypto(e.to_string()))?;
+    let digest = Sha256::digest(bytes);
+    let mut out = [0u8; 32];
+    out.copy_from_slice(&digest);
+    Ok(out)
+}
+
+pub fn build_and_sign_transfer(
+    password: &str,
+    req: TxBuildRequest,
+) -> Result<TxEnvelope, PocketError> {
+    let info = load_keystore(password)?;
+    let chain_id = req.chain_id.unwrap_or_else(|| "peace-testnet".into());
+    // Construct minimal tx map per spec.
+    let mut tx_map = serde_json::Map::new();
+    tx_map.insert("from".into(), serde_json::Value::String(info.address.clone()));
+    tx_map.insert("nonce".into(), serde_json::Value::Number((req.nonce.unwrap_or(0)).into()));
+    tx_map.insert(
+        "fee".into(),
+        serde_json::Value::Number(serde_json::Number::from(req.fee)),
+    );
+    tx_map.insert(
+        "timestamp".into(),
+        serde_json::Value::Number(serde_json::Number::from(req.timestamp.unwrap_or_else(|| now_ts()))),
+    );
+    tx_map.insert("chain_id".into(), serde_json::Value::String(chain_id.clone()));
+    tx_map.insert("pubkey_hex".into(), serde_json::Value::String(info.public_key_hex.clone()));
+    let kind = serde_json::json!({
+        "Transfer": {
+            "to": req.to,
+            "amount": req.amount,
+        }
+    });
+    tx_map.insert("kind".into(), kind);
+
+    let mut tx_val = serde_json::Value::Object(tx_map);
+    let msg = tx_signing_bytes(&tx_val)?;
+    let seed_bytes = Mnemonic::parse_in_normalized(Language::English, &info.mnemonic)
+        .map_err(|e| PocketError::Mnemonic(e.to_string()))?
+        .to_seed("");
+    let sk = SigningKey::from_bytes(&seed_bytes[0..32].try_into().unwrap());
+    let sig = sk.sign(&msg);
+    tx_val
+        .as_object_mut()
+        .ok_or_else(|| PocketError::Crypto("tx not object".into()))?
+        .insert(
+            "signature".into(),
+            serde_json::Value::String(hex::encode(sig.to_bytes())),
+        );
+    let txid = tx_id_bytes(&tx_val)?;
+    Ok(TxEnvelope {
+        tx: tx_val,
+        tx_id: hex::encode(txid),
+    })
+}
+
+pub fn submit_tx(rpc: Option<String>, token: Option<String>, signed: &serde_json::Value) -> Result<String, PocketError> {
+    let cfg = load_config().unwrap_or_default();
+    let rpc_base = rpc.or(cfg.rpc_base.clone()).unwrap_or_else(|| "https://127.0.0.1:8645".to_string());
+    let client = rpc_client()?;
+    let mut reqb = client
+        .post(format!("{}/weave/chain/tx", rpc_base.trim_end_matches('/')))
+        .json(&serde_json::json!({"tx": signed}));
+    if let Some(t) = token.or(cfg.token).or_else(|| std::env::var("LANTERN_HTTP_TOKEN").ok()) {
+        reqb = reqb.bearer_auth(t);
+    }
+    let resp = reqb.send().map_err(|e| PocketError::Rpc(e.to_string()))?;
+    if !resp.status().is_success() {
+        return Err(PocketError::Rpc(format!("http {}", resp.status())));
+    }
+    resp.text().map_err(|e| PocketError::Rpc(e.to_string()))
+}
+
+fn now_ts() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0)
 }
