@@ -1,0 +1,46 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Cargo fmt
+        run: cargo fmt -- --check
+      - name: Cargo clippy
+        run: cargo clippy --all-targets --all-features -- -D warnings
+      - name: Cargo test
+        run: cargo test
+
+  macos-bundle:
+    runs-on: macos-latest
+    needs: build
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Install tauri-cli
+        run: cargo install tauri-cli --locked
+      - name: Build Tauri bundle (unsigned)
+        working-directory: gui
+        run: cargo tauri build --verbose
+      - name: Notarize (if secrets provided)
+        if: env.APPLE_ID != '' && env.APPLE_TEAM_ID != '' && env.APPLE_PASSWORD != ''
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+        run: |
+          DMG=$(ls gui/src-tauri/target/release/bundle/macos/*.dmg | head -n1)
+          xcrun notarytool submit "$DMG" --apple-id "$APPLE_ID" --team-id "$APPLE_TEAM_ID" --password "$APPLE_PASSWORD" --wait
+          xcrun stapler staple "$DMG"
+      - name: Upload bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: pocket-macos-bundle
+          path: |
+            gui/src-tauri/target/release/bundle/macos/*

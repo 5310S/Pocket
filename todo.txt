@@ -14,10 +14,10 @@ Pocket Wallet Plan (macOS focus)
 
 3) Transaction building & signing
    [x] Build/sign/submit transfer
-   [ ] Build/sign/submit stake
-   [ ] Build/sign/submit unbond
-   [ ] Build/sign/submit update-validator
-   [ ] Nonce helper uses pending pool (not just ledger nonce)
+   [x] Build/sign/submit stake
+   [x] Build/sign/submit unbond
+   [x] Build/sign/submit update-validator
+   [x] Nonce helper uses pending pool (not just ledger nonce)
 
 4) Mining payout support for Weave
    [x] Select/store payout address and attestation token
@@ -26,25 +26,26 @@ Pocket Wallet Plan (macOS focus)
 5) UI/UX surface (macOS)
    [x] Tauri GUI scaffold (init/show/balance/head/difficulty)
    [x] Send form for transfers
-   [ ] Tx kind selector + dynamic fields (stake/unbond/update-validator)
-   [ ] Lock/unlock flow (clear in-memory password, disable actions, auto-lock timer)
-   [ ] Persist GUI settings (RPC/token/payout) and prefill on load
-   [ ] Error banners and validation on inputs
+   [x] Tx kind selector + dynamic fields (stake/unbond/update-validator)
+   [x] Lock/unlock flow (clear in-memory password, disable actions, auto-lock timer)
+   [x] Persist GUI settings (RPC/token/payout) and prefill on load
+   [x] Error banners and validation on inputs
 
 6) Security & storage
    [ ] Hardware keystore hook (future)
    [ ] Document PBKDF/crypto params (Argon2id + AES-GCM)
 
 7) Config & env
-   [ ] Rate-limit/backoff for RPC
-   [ ] Ensure HRP/chain-id alignment checks on sends
+   [x] Rate-limit/backoff for RPC (+ TLS strict by default; POCKET_TLS_INSECURE to override)
+   [x] Ensure HRP/chain-id alignment checks on sends
 
 8) Tests & tooling
-   [ ] Unit tests: key derivation, address encoding, signing determinism, build_kind serialization
-   [ ] Integration tests against local Lantern RPC (mock or real)
-   [ ] Lint/format CI
+   [x] Unit tests: key derivation/address encoding + build_kind serialization
+   [x] Integration tests against local Lantern RPC (mock or real)
+   [x] Lint/format CI
+   [x] Deterministic signing property test (signature-agnostic bytes)
 
 9) Packaging & deployment (macOS)
-   [ ] Tauri bundle for macOS (.app/.dmg)
-   [ ] App icon, signing/notarization plan
-   [ ] Release pipeline
+   [x] Tauri bundle for macOS (.app/.dmg) via CI artifact (unsigned)
+   [x] App icon placeholder added (gui/src-tauri/icons/icon.png); signing/notarization plan doc
+   [ ] Release pipeline (publish artifacts + notarized build when creds provided)

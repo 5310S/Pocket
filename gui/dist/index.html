@@ -5,34 +5,41 @@
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>Pocket Wallet</title>
   <style>
-    :root { --bg:#050915; --panel:#0f1a33; --accent:#4de1ff; --text:#e9eef7; --muted:#a9b7d4; }
+    :root { --bg:#050915; --panel:#0f1a33; --accent:#4de1ff; --text:#e9eef7; --muted:#a9b7d4; --error:#ff7b7b; --ok:#7dffb5; }
     body { margin:0; font-family: 'Inter', system-ui, -apple-system, sans-serif; background:var(--bg); color:var(--text); }
-    header { padding:18px 20px; background:linear-gradient(135deg,#0b1227,#0d1c3a); border-bottom:1px solid rgba(255,255,255,0.08); }
+    header { padding:18px 20px; background:linear-gradient(135deg,#0b1227,#0d1c3a); border-bottom:1px solid rgba(255,255,255,0.08); display:flex; align-items:center; justify-content:space-between; gap:14px; }
     h1 { margin:0; font-size:22px; }
-    main { max-width:640px; margin:30px auto 60px; padding:0 20px; display:grid; gap:16px; }
+    main { max-width:700px; margin:30px auto 80px; padding:0 20px; display:grid; gap:16px; }
     section { background:var(--panel); border:1px solid rgba(255,255,255,0.07); border-radius:12px; padding:16px 18px; box-shadow:0 12px 32px rgba(0,0,0,0.35); }
     label { display:block; font-size:13px; color:var(--muted); margin-bottom:4px; }
-    input { width:100%; padding:10px; border-radius:8px; border:1px solid rgba(255,255,255,0.12); background:#0b1327; color:var(--text); }
+    input, select { width:100%; padding:10px; border-radius:8px; border:1px solid rgba(255,255,255,0.12); background:#0b1327; color:var(--text); }
     button { margin-top:10px; padding:10px 14px; border:none; border-radius:10px; background:var(--accent); color:#04101f; font-weight:700; cursor:pointer; }
     pre { background:#0a142a; padding:10px; border-radius:8px; overflow:auto; color:#dfe7f7; }
     .row { display:flex; gap:10px; align-items:center; }
-    .status { font-size:13px; color:var(--muted); }
+    .status { font-size:13px; color:var(--muted); display:flex; align-items:center; gap:8px; }
+    .dot { width:10px; height:10px; border-radius:50%; background:var(--muted); box-shadow:0 0 0 2px rgba(0,0,0,0.25); }
+    .banner { padding:10px 12px; border-radius:10px; background:rgba(255,123,123,0.08); border:1px solid rgba(255,123,123,0.35); color:var(--error); font-size:13px; display:none; }
+    .muted { color:var(--muted); font-size:12px; }
   </style>
 </head>
 <body>
   <header>
     <h1>Pocket Wallet (macOS demo)</h1>
-    <div class="status" id="status">Ready</div>
+    <div class="status"><div class="dot" id="dot"></div><span id="status">Ready</span></div>
   </header>
   <main>
+    <div class="banner" id="error-banner"></div>
     <section>
       <label for="password">Keystore password</label>
       <input id="password" type="password" placeholder="Enter password">
       <div class="row">
-        <button id="init">Init keystore</button>
-        <button id="show">Show address</button>
-        <button id="balance">Get balance</button>
+        <button id="unlock">Unlock</button>
+        <button id="lock">Lock</button>
+        <button id="init" data-need-pass="1">Init keystore</button>
+        <button id="show" data-need-pass="1">Show address</button>
+        <button id="balance" data-need-pass="1">Get balance</button>
       </div>
+      <div class="muted">Wallet auto-locks after 5 minutes of inactivity.</div>
     </section>
     <section>
       <h3>Chain status</h3>
@@ -43,15 +50,50 @@
     </section>
     <section>
       <h3>Send</h3>
-      <div class="row" style="flex-wrap:wrap; gap:8px;">
-        <input id="send-to" placeholder="To (pc/tpc)" style="flex:1; min-width:200px;">
-        <input id="send-amt" type="number" placeholder="Amount" style="width:120px;">
-        <input id="send-fee" type="number" placeholder="Fee" value="1" style="width:100px;">
+      <div class="row" style="flex-wrap:wrap; gap:8px; align-items:flex-end;">
+        <label style="flex:1;">
+          <span>Kind</span>
+          <select id="tx-kind" style="width:100%; padding:10px; border-radius:8px; border:1px solid rgba(255,255,255,0.12); background:#0b1327; color:var(--text);">
+            <option value="transfer">Transfer</option>
+            <option value="stake">Stake</option>
+            <option value="unbond">Unbond</option>
+            <option value="update-validator">Update Validator</option>
+          </select>
+        </label>
+        <label style="flex:2; display:none;" id="row-to">
+          <span>To (transfer)</span>
+          <input id="send-to" placeholder="pc/tpc address">
+        </label>
+        <label style="flex:1;">
+          <span id="amt-label">Amount</span>
+          <input id="send-amt" type="number" placeholder="0">
+        </label>
+        <label style="width:110px;">
+          <span>Fee</span>
+          <input id="send-fee" type="number" placeholder="1" value="1">
+        </label>
       </div>
-      <div class="row" style="flex-wrap:wrap; gap:8px; margin-top:8px;">
-        <input id="send-nonce" type="number" placeholder="Nonce (optional)" style="width:160px;">
-        <input id="send-ts" type="number" placeholder="Timestamp (optional)" style="width:200px;">
-        <input id="send-chain" placeholder="Chain ID" value="peace-testnet" style="width:180px;">
+      <div class="row" style="flex-wrap:wrap; gap:8px; margin-top:8px; align-items:flex-end;">
+        <label style="flex:1; display:none;" id="row-payout">
+          <span>Payout (stake/update)</span>
+          <input id="send-payout" placeholder="pc/tpc payout address">
+        </label>
+        <label style="width:140px; display:none;" id="row-commission">
+          <span>Commission bps</span>
+          <input id="send-commission" type="number" placeholder="0">
+        </label>
+        <label style="width:160px;">
+          <span>Nonce (optional)</span>
+          <input id="send-nonce" type="number" placeholder="auto">
+        </label>
+        <label style="width:180px;">
+          <span>Timestamp (optional)</span>
+          <input id="send-ts" type="number" placeholder="now">
+        </label>
+        <label style="width:180px;">
+          <span>Chain ID</span>
+          <input id="send-chain" placeholder="peace-testnet" value="peace-testnet">
+        </label>
       </div>
       <div class="row">
         <button id="send-btn">Sign & Submit</button>
@@ -60,12 +102,12 @@
     <section>
       <h3>Import / Export</h3>
       <div class="row">
-        <button id="export">Export mnemonic</button>
+        <button id="export" data-need-pass="1">Export mnemonic</button>
       </div>
       <div class="row" style="flex-wrap:wrap; gap:8px;">
         <input id="import-mnemonic" placeholder="Enter mnemonic to import" style="flex:1; min-width:320px;">
         <input id="import-hrp" placeholder="HRP (pc/tpc)" value="tpc" style="width:100px;">
-        <button id="import">Import</button>
+        <button id="import" data-need-pass="1">Import</button>
       </div>
     </section>
     <section>
@@ -93,85 +135,237 @@
   <script>
     const { invoke } = window.__TAURI__.tauri;
     const status = document.getElementById('status');
+    const dot = document.getElementById('dot');
+    const banner = document.getElementById('error-banner');
     const output = document.getElementById('output');
+    let locked = true;
+    let lockTimer = null;
+    let currentRpc = null;
+
     function setStatus(msg) { status.textContent = msg; }
+    function setDot(ok) { dot.style.background = ok ? 'var(--ok)' : 'var(--muted)'; }
+    function showError(msg) {
+      banner.style.display = msg ? 'block' : 'none';
+      banner.textContent = msg || '';
+      if (msg) setDot(false);
+    }
+    function clearError() { showError(''); }
     function setOutput(obj) { output.textContent = typeof obj === 'string' ? obj : JSON.stringify(obj,null,2); }
+    function bumpLockTimer() {
+      if (lockTimer) clearTimeout(lockTimer);
+      lockTimer = setTimeout(() => setLocked(true), 5 * 60 * 1000);
+    }
+    function setLocked(val) {
+      locked = val;
+      document.querySelectorAll('[data-need-pass]').forEach(btn => btn.disabled = locked);
+      if (locked) {
+        document.getElementById('password').value = '';
+        setStatus('Locked');
+        setDot(false);
+      } else {
+        setStatus('Unlocked');
+        setDot(true);
+        bumpLockTimer();
+      }
+    }
+
+    function hrpForChain(chainId) {
+      if (!chainId) return '';
+      if (chainId.startsWith('peace-mainnet')) return 'pc';
+      if (chainId.startsWith('peace-testnet')) return 'tpc';
+      return '';
+    }
+    function isBechForChain(addr, chainId) {
+      const hrp = hrpForChain(chainId);
+      if (!addr || !hrp) return false;
+      const re = new RegExp('^' + hrp + '1[0-9ac-hj-np-z]{38,}$'); // simple BIP173 charset check
+      return re.test(addr);
+    }
 
     async function call(cmd, args) {
       try {
         setStatus('Running ' + cmd + '...');
+        clearError();
         const res = await invoke(cmd, args);
         setOutput(res);
         setStatus('OK');
+        setDot(true);
+        bumpLockTimer();
       } catch (e) {
         setStatus('Error');
         setOutput(String(e));
+        showError(String(e));
       }
     }
 
+    document.getElementById('unlock').onclick = () => {
+      const pw = document.getElementById('password').value;
+      if (!pw) { showError('Enter password to unlock'); return; }
+      clearError();
+      setLocked(false);
+    };
+    document.getElementById('lock').onclick = () => setLocked(true);
+
+    function requireUnlock() {
+      if (locked) { showError('Unlock first'); return false; }
+      return true;
+    }
+
     document.getElementById('init').onclick = () => {
+      if (!requireUnlock()) return;
       const password = document.getElementById('password').value;
       call('cmd_init', { password, hrp: 'tpc' });
     };
     document.getElementById('show').onclick = () => {
+      if (!requireUnlock()) return;
       const password = document.getElementById('password').value;
       call('cmd_show', { password });
     };
     document.getElementById('balance').onclick = () => {
+      if (!requireUnlock()) return;
       const password = document.getElementById('password').value;
-      call('cmd_balance', { password, rpc: 'https://127.0.0.1:8645', token: null });
+      const rpc = document.getElementById('rpc').value || 'https://127.0.0.1:8645';
+      const token = document.getElementById('token').value || null;
+      call('cmd_balance', { password, rpc, token });
     };
     document.getElementById('head').onclick = () => {
-      call('cmd_head', { rpc: 'https://127.0.0.1:8645', token: null });
+      const rpc = document.getElementById('rpc').value || 'https://127.0.0.1:8645';
+      const token = document.getElementById('token').value || null;
+      call('cmd_head', { rpc, token });
     };
     document.getElementById('diff').onclick = () => {
-      call('cmd_difficulty', { rpc: 'https://127.0.0.1:8645', token: null });
+      const rpc = document.getElementById('rpc').value || 'https://127.0.0.1:8645';
+      const token = document.getElementById('token').value || null;
+      call('cmd_difficulty', { rpc, token });
     };
+    const kindSel = document.getElementById('tx-kind');
+    const rowTo = document.getElementById('row-to');
+    const rowPayout = document.getElementById('row-payout');
+    const rowCommission = document.getElementById('row-commission');
+    const amtLabel = document.getElementById('amt-label');
+
+    function refreshKindUi() {
+      const k = kindSel.value;
+      rowTo.style.display = k === 'transfer' ? 'block' : 'none';
+      rowPayout.style.display = (k === 'stake' || k === 'update-validator') ? 'block' : 'none';
+      rowCommission.style.display = (k === 'stake' || k === 'update-validator') ? 'block' : 'none';
+      amtLabel.textContent = k === 'unbond' ? 'Amount to unbond' : 'Amount';
+    }
+    kindSel.onchange = refreshKindUi;
+    refreshKindUi();
+
     document.getElementById('send-btn').onclick = () => {
+      if (!requireUnlock()) return;
       const password = document.getElementById('password').value;
-      const to = document.getElementById('send-to').value;
-      const amount = Number(document.getElementById('send-amt').value || '0');
+      const kind = kindSel.value;
+      const to = document.getElementById('send-to').value || null;
+      const payout = document.getElementById('send-payout').value || null;
+      const commission = document.getElementById('send-commission').value;
+      const amountVal = document.getElementById('send-amt').value;
+      const amount = amountVal ? Number(amountVal) : null;
       const fee = Number(document.getElementById('send-fee').value || '1');
       const nonce = document.getElementById('send-nonce').value;
       const timestamp = document.getElementById('send-ts').value;
       const chainId = document.getElementById('send-chain').value || null;
+      if (kind === 'transfer' && (!to || !amount)) { showError('Transfer needs destination and amount'); return; }
+      if (kind === 'stake' && (!payout || !amount)) { showError('Stake needs payout address and amount'); return; }
+      if (kind === 'unbond' && !amount) { showError('Unbond needs amount'); return; }
+      const hrp = hrpForChain(chainId);
+      if (kind === 'transfer' && to && !isBechForChain(to, chainId)) { showError('Destination must match chain HRP ' + hrp); return; }
+      if ((kind === 'stake' || kind === 'update-validator') && payout && !isBechForChain(payout, chainId)) { showError('Payout must match chain HRP ' + hrp); return; }
       call('cmd_send', {
         password,
+        kind,
         to,
         amount,
+        payout,
+        commission_bps: commission ? Number(commission) : null,
         fee,
         nonce: nonce ? Number(nonce) : null,
         timestamp: timestamp ? Number(timestamp) : null,
-        chainId,
+        chain_id: chainId,
+        pending_pool: null,
         rpc: null,
         token: null,
       });
     };
     document.getElementById('export').onclick = () => {
+      if (!requireUnlock()) return;
       call('cmd_export', { password: document.getElementById('password').value });
     };
     document.getElementById('import').onclick = () => {
+      if (!requireUnlock()) return;
       const password = document.getElementById('password').value;
       const mnemonic = document.getElementById('import-mnemonic').value;
       const hrp = document.getElementById('import-hrp').value || 'tpc';
       call('cmd_import', { password, mnemonic, hrp });
     };
+    function persistSettings() {
+      localStorage.setItem('pocket_rpc', document.getElementById('rpc').value || '');
+      localStorage.setItem('pocket_token', document.getElementById('token').value || '');
+      localStorage.setItem('pocket_payout', document.getElementById('payout').value || '');
+      localStorage.setItem('pocket_att', document.getElementById('att').value || '');
+    }
+    function loadSettings() {
+      document.getElementById('rpc').value = localStorage.getItem('pocket_rpc') || '';
+      document.getElementById('token').value = localStorage.getItem('pocket_token') || '';
+      document.getElementById('payout').value = localStorage.getItem('pocket_payout') || '';
+      document.getElementById('att').value = localStorage.getItem('pocket_att') || '';
+      currentRpc = document.getElementById('rpc').value || null;
+    }
+    }
     document.getElementById('save-config').onclick = () => {
       const rpc = document.getElementById('rpc').value || null;
       const token = document.getElementById('token').value || null;
+      currentRpc = rpc;
+      persistSettings();
       call('cmd_set_config', { rpc, token });
     };
     document.getElementById('show-config').onclick = () => {
-      call('cmd_show_config', {});
+      call('cmd_show_config', {}).then(() => setDot(true)).catch(() => setDot(false));
     };
     document.getElementById('save-profile').onclick = () => {
       const address = document.getElementById('payout').value;
       const attestation = document.getElementById('att').value || null;
+      persistSettings();
       call('cmd_set_profile', { address, attestation });
     };
     document.getElementById('show-profile').onclick = () => {
       call('cmd_show_profile', {});
     };
+
+    async function hydrateFromBackend() {
+      try {
+        const cfg = await invoke('cmd_show_config', {});
+        const obj = JSON.parse(cfg);
+        if (obj.rpc_base) { document.getElementById('rpc').value = obj.rpc_base; currentRpc = obj.rpc_base; }
+        if (obj.token) { document.getElementById('token').value = obj.token; }
+      } catch (e) { /* ignore */ }
+      try {
+        const prof = await invoke('cmd_get_payout', {});
+        const obj = JSON.parse(prof);
+        if (obj.payout_address) document.getElementById('payout').value = obj.payout_address;
+        if (obj.attestation_token) document.getElementById('att').value = obj.attestation_token;
+      } catch (e) { /* ignore */ }
+      persistSettings();
+    }
+
+    async function pingRpc() {
+      if (!currentRpc) { setDot(false); return; }
+      try {
+        await invoke('cmd_head', { rpc: currentRpc, token: document.getElementById('token').value || null });
+        setDot(true);
+        setStatus('RPC OK');
+      } catch (e) {
+        setDot(false);
+        setStatus('RPC unreachable');
+      }
+    }
+
+    // bootstrap
+    loadSettings();
+    hydrateFromBackend().then(pingRpc);
+    setLocked(true);
   </script>
 </body>
 </html>

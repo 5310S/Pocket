@@ -1,8 +1,8 @@
 use clap::{Parser, Subcommand};
 use pocket_lib::{
-    addr_from_mnemonic, balance, chain_head, difficulty, export_mnemonic, gen_key, import_mnemonic,
-    init_keystore, load_config, load_keystore, load_profile, save_config, save_profile, submit_tx,
-    Config, PocketError, Profile, TxBuildRequest, build_and_sign_transfer,
+    addr_from_mnemonic, balance, build_and_sign_transfer, chain_head, difficulty, export_mnemonic,
+    gen_key, import_mnemonic, init_keystore, load_config, load_keystore, load_profile, save_config,
+    save_profile, submit_tx, BuildKind, Config, PocketError, Profile, TxBuildRequest,
 };
 
 #[derive(Parser)]
@@ -102,14 +102,25 @@ enum Commands {
         #[arg(long)]
         token: Option<String>,
     },
-    /// Build, sign, and submit a transfer
+    /// Build, sign, and submit a transaction
     Send {
         #[arg(long)]
         password: String,
+        /// Tx kind: transfer | stake | unbond | update-validator
+        #[arg(long, default_value = "transfer")]
+        kind: String,
+        /// Destination for transfers
         #[arg(long)]
-        to: String,
+        to: Option<String>,
+        /// Amount (transfer / stake / unbond)
         #[arg(long)]
-        amount: u64,
+        amount: Option<u64>,
+        /// Payout address (stake / update-validator)
+        #[arg(long)]
+        payout: Option<String>,
+        /// Commission basis points (stake / update-validator)
+        #[arg(long)]
+        commission_bps: Option<u16>,
         #[arg(long, default_value_t = 1)]
         fee: u64,
         #[arg(long)]
@@ -122,6 +133,9 @@ enum Commands {
         rpc: Option<String>,
         #[arg(long)]
         token: Option<String>,
+        /// Optional path to Lantern tx pool file to include pending nonces
+        #[arg(long)]
+        pending_pool: Option<String>,
     },
 }
 
@@ -129,30 +143,105 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let cli = Cli::parse();
     let hrp = cli.hrp.as_str();
     let res: Result<String, PocketError> = match cli.command {
-        Commands::Keygen { words } => gen_key(words, hrp).map(|i| serde_json::to_string_pretty(&i).unwrap()),
-        Commands::Addr { mnemonic } => addr_from_mnemonic(&mnemonic, hrp).map(|i| serde_json::to_string_pretty(&i).unwrap()),
-        Commands::Init { password, hrp } => init_keystore(&password, &hrp).map(|i| serde_json::to_string_pretty(&i).unwrap()),
-        Commands::Show { password } => load_keystore(&password).map(|i| serde_json::to_string_pretty(&i).unwrap()),
-        Commands::Import { password, mnemonic, hrp } => import_mnemonic(&password, &mnemonic, &hrp).map(|i| serde_json::to_string_pretty(&i).unwrap()),
-        Commands::Export { password } => export_mnemonic(&password).map(|m| serde_json::to_string_pretty(&serde_json::json!({"mnemonic": m})).unwrap()),
-        Commands::SetConfig { rpc, token } => save_config(&Config { rpc_base: rpc, token }).map(|_| "{\"status\":\"ok\"}".into()),
+        Commands::Keygen { words } => {
+            gen_key(words, hrp).map(|i| serde_json::to_string_pretty(&i).unwrap())
+        }
+        Commands::Addr { mnemonic } => {
+            addr_from_mnemonic(&mnemonic, hrp).map(|i| serde_json::to_string_pretty(&i).unwrap())
+        }
+        Commands::Init { password, hrp } => {
+            init_keystore(&password, &hrp).map(|i| serde_json::to_string_pretty(&i).unwrap())
+        }
+        Commands::Show { password } => {
+            load_keystore(&password).map(|i| serde_json::to_string_pretty(&i).unwrap())
+        }
+        Commands::Import {
+            password,
+            mnemonic,
+            hrp,
+        } => import_mnemonic(&password, &mnemonic, &hrp)
+            .map(|i| serde_json::to_string_pretty(&i).unwrap()),
+        Commands::Export { password } => export_mnemonic(&password)
+            .map(|m| serde_json::to_string_pretty(&serde_json::json!({"mnemonic": m})).unwrap()),
+        Commands::SetConfig { rpc, token } => save_config(&Config {
+            rpc_base: rpc,
+            token,
+        })
+        .map(|_| "{\"status\":\"ok\"}".into()),
         Commands::ShowConfig => load_config().map(|c| serde_json::to_string_pretty(&c).unwrap()),
-        Commands::SetPayout { address, attestation } => save_profile(&Profile { payout_address: Some(address), attestation_token: attestation }).map(|_| "{\"status\":\"ok\"}".into()),
+        Commands::SetPayout {
+            address,
+            attestation,
+        } => save_profile(&Profile {
+            payout_address: Some(address),
+            attestation_token: attestation,
+        })
+        .map(|_| "{\"status\":\"ok\"}".into()),
         Commands::ShowProfile => load_profile().map(|p| serde_json::to_string_pretty(&p).unwrap()),
-        Commands::Balance { password, rpc, token } => balance(&password, rpc, token),
+        Commands::Balance {
+            password,
+            rpc,
+            token,
+        } => balance(&password, rpc, token),
         Commands::Head { rpc, token } => chain_head(rpc, token),
         Commands::Difficulty { rpc, token } => difficulty(rpc, token),
-        Commands::Send { password, to, amount, fee, nonce, timestamp, chain_id, rpc, token } => {
-            let env = build_and_sign_transfer(&password, TxBuildRequest {
-                kind: pocket_lib::BuildKind::Transfer { to, amount },
-                fee,
-                nonce,
-                timestamp,
-                chain_id,
-                memo: None,
-            }, rpc.clone(), token.clone())?;
+        Commands::Send {
+            password,
+            kind,
+            to,
+            amount,
+            payout,
+            commission_bps,
+            fee,
+            nonce,
+            timestamp,
+            chain_id,
+            rpc,
+            token,
+            pending_pool,
+        } => {
+            let kind_enum = match kind.as_str() {
+                "transfer" => BuildKind::Transfer {
+                    to: to.ok_or_else(|| PocketError::Rpc("missing --to for transfer".into()))?,
+                    amount: amount
+                        .ok_or_else(|| PocketError::Rpc("missing --amount for transfer".into()))?,
+                },
+                "stake" => BuildKind::Stake {
+                    amount: amount
+                        .ok_or_else(|| PocketError::Rpc("missing --amount for stake".into()))?,
+                    payout: payout
+                        .ok_or_else(|| PocketError::Rpc("missing --payout for stake".into()))?,
+                    commission_bps: commission_bps.unwrap_or(0),
+                },
+                "unbond" => BuildKind::Unbond {
+                    amount: amount
+                        .ok_or_else(|| PocketError::Rpc("missing --amount for unbond".into()))?,
+                },
+                "update-validator" => BuildKind::UpdateValidator {
+                    payout,
+                    commission_bps,
+                },
+                other => Err(PocketError::Rpc(format!("unsupported kind {other}")))?,
+            };
+            let env = build_and_sign_transfer(
+                &password,
+                TxBuildRequest {
+                    kind: kind_enum,
+                    fee,
+                    nonce,
+                    timestamp,
+                    chain_id,
+                    memo: None,
+                    pending_pool,
+                },
+                rpc.clone(),
+                token.clone(),
+            )?;
             let submit = submit_tx(rpc, token, &env.tx)?;
-            Ok(serde_json::to_string_pretty(&serde_json::json!({"tx_id": env.tx_id, "submit": submit})).unwrap())
+            Ok(serde_json::to_string_pretty(
+                &serde_json::json!({"tx_id": env.tx_id, "submit": submit}),
+            )
+            .unwrap())
         }
     };
 

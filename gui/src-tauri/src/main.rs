@@ -3,7 +3,7 @@
 use pocket_lib::{
     balance, chain_head, difficulty, export_mnemonic, import_mnemonic, init_keystore, load_config,
     load_keystore, load_profile, save_config, save_profile, submit_tx, build_and_sign_transfer,
-    Config, PocketError, Profile, TxBuildRequest, BuildKind,
+    BuildKind, Config, PocketError, Profile, TxBuildRequest,
 };
 
 fn map_err(e: PocketError) -> String { e.to_string() }
@@ -66,15 +66,61 @@ fn cmd_show_profile() -> Result<String, String> {
 }
 
 #[tauri::command]
-fn cmd_send(password: String, to: String, amount: u64, fee: u64, nonce: Option<u64>, timestamp: Option<u64>, chain_id: Option<String>, rpc: Option<String>, token: Option<String>) -> Result<String, String> {
-    let env = build_and_sign_transfer(&password, TxBuildRequest {
-        kind: BuildKind::Transfer { to, amount },
-        fee,
-        nonce,
-        timestamp,
-        chain_id,
-        memo: None,
-    }, rpc.clone(), token.clone()).map_err(map_err)?;
+fn cmd_get_payout() -> Result<String, String> {
+    let profile = load_profile().unwrap_or_default();
+    Ok(serde_json::to_string_pretty(&profile).unwrap())
+}
+#[tauri::command]
+fn cmd_send(
+    password: String,
+    kind: String,
+    to: Option<String>,
+    amount: Option<u64>,
+    payout: Option<String>,
+    commission_bps: Option<u16>,
+    fee: u64,
+    nonce: Option<u64>,
+    timestamp: Option<u64>,
+    chain_id: Option<String>,
+    rpc: Option<String>,
+    token: Option<String>,
+    pending_pool: Option<String>,
+) -> Result<String, String> {
+    let kind_enum = match kind.as_str() {
+        "transfer" => BuildKind::Transfer {
+            to: to.ok_or_else(|| "missing to".to_string())?,
+            amount: amount.ok_or_else(|| "missing amount".to_string())?,
+        },
+        "stake" => BuildKind::Stake {
+            amount: amount.ok_or_else(|| "missing amount".to_string())?,
+            payout: payout.ok_or_else(|| "missing payout".to_string())?,
+            commission_bps: commission_bps.unwrap_or(0),
+        },
+        "unbond" => BuildKind::Unbond {
+            amount: amount.ok_or_else(|| "missing amount".to_string())?,
+        },
+        "update-validator" => BuildKind::UpdateValidator {
+            payout,
+            commission_bps,
+        },
+        other => return Err(format!("unsupported kind {other}")),
+    };
+
+    let env = build_and_sign_transfer(
+        &password,
+        TxBuildRequest {
+            kind: kind_enum,
+            fee,
+            nonce,
+            timestamp,
+            chain_id,
+            memo: None,
+            pending_pool,
+        },
+        rpc.clone(),
+        token.clone(),
+    )
+    .map_err(map_err)?;
     let res = submit_tx(rpc, token, &env.tx).map_err(map_err)?;
     Ok(serde_json::to_string_pretty(&serde_json::json!({"tx_id": env.tx_id, "submit": res})).unwrap())
 }
@@ -93,6 +139,7 @@ fn main() {
             cmd_show_config,
             cmd_set_profile,
             cmd_show_profile,
+            cmd_get_payout,
             cmd_send,
         ])
         .run(tauri::generate_context!())

@@ -1,6 +1,6 @@
 [package]
 name = "pocket"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
 authors = ["5310S <dev@5310s.com>"]
 license = "MIT OR Apache-2.0"
@@ -25,6 +25,9 @@ tiny_http = "0.12"
 serde_yaml = "0.9"
 sha2 = "0.10"
 strum = { version = "0.26", features = ["derive"] }
+
+[dev-dependencies]
+tempfile = "3"
 
 [lib]
 name = "pocket_lib"
