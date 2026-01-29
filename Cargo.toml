@@ -21,6 +21,7 @@ argon2 = "0.5"
 base64 = "0.21"
 reqwest = { version = "0.12", features = ["json", "rustls-tls", "blocking"] }
 dirs = "5"
+tiny_http = "0.12"
 
 [lib]
 name = "pocket_lib"

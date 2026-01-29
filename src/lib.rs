@@ -44,6 +44,20 @@ struct Keystore {
 }
 
 const KEYSTORE_PATH: &str = "~/.pocket/keystore.json";
+const CONFIG_PATH: &str = "~/.pocket/config.json";
+const PROFILE_PATH: &str = "~/.pocket/profile.json";
+
+#[derive(Serialize, Deserialize, Clone, Default)]
+pub struct Config {
+    pub rpc_base: Option<String>,
+    pub token: Option<String>,
+}
+
+#[derive(Serialize, Deserialize, Clone, Default)]
+pub struct Profile {
+    pub payout_address: Option<String>,
+    pub attestation_token: Option<String>,
+}
 
 fn hrp_valid(hrp: &str) -> bool {
     matches!(hrp, "pc" | "tpc")
@@ -96,6 +110,48 @@ fn expand_path(p: &str) -> PathBuf {
 
 fn keystore_path() -> PathBuf {
     expand_path(KEYSTORE_PATH)
+}
+
+fn config_path() -> PathBuf {
+    expand_path(CONFIG_PATH)
+}
+
+fn profile_path() -> PathBuf {
+    expand_path(PROFILE_PATH)
+}
+
+pub fn save_config(cfg: &Config) -> Result<(), PocketError> {
+    let path = config_path();
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).map_err(|e| PocketError::Io(e.to_string()))?;
+    }
+    let data = serde_json::to_vec_pretty(cfg).map_err(|e| PocketError::Io(e.to_string()))?;
+    fs::write(&path, data).map_err(|e| PocketError::Io(e.to_string()))
+}
+
+pub fn load_config() -> Result<Config, PocketError> {
+    let path = config_path();
+    match fs::read_to_string(&path) {
+        Ok(txt) => serde_json::from_str(&txt).map_err(|e| PocketError::Io(e.to_string())),
+        Err(_) => Ok(Config::default()),
+    }
+}
+
+pub fn save_profile(profile: &Profile) -> Result<(), PocketError> {
+    let path = profile_path();
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).map_err(|e| PocketError::Io(e.to_string()))?;
+    }
+    let data = serde_json::to_vec_pretty(profile).map_err(|e| PocketError::Io(e.to_string()))?;
+    fs::write(&path, data).map_err(|e| PocketError::Io(e.to_string()))
+}
+
+pub fn load_profile() -> Result<Profile, PocketError> {
+    let path = profile_path();
+    match fs::read_to_string(&path) {
+        Ok(txt) => serde_json::from_str(&txt).map_err(|e| PocketError::Io(e.to_string())),
+        Err(_) => Ok(Profile::default()),
+    }
 }
 
 fn derive_key(password: &str, salt: &[u8]) -> Result<[u8; 32], PocketError> {
@@ -166,28 +222,50 @@ pub fn load_keystore(password: &str) -> Result<KeyInfo, PocketError> {
     addr_from_mnemonic(&mnemonic, &ks.hrp)
 }
 
+pub fn export_mnemonic(password: &str) -> Result<String, PocketError> {
+    let path = keystore_path();
+    let data = fs::read_to_string(&path).map_err(|e| PocketError::Io(e.to_string()))?;
+    let ks: Keystore = serde_json::from_str(&data).map_err(|e| PocketError::Io(e.to_string()))?;
+    decrypt_mnemonic(&ks, password)
+}
+
+pub fn import_mnemonic(password: &str, mnemonic: &str, hrp: &str) -> Result<KeyInfo, PocketError> {
+    let _ = addr_from_mnemonic(mnemonic, hrp)?;
+    let ks = encrypt_mnemonic(mnemonic, password, hrp)?;
+    let path = keystore_path();
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).map_err(|e| PocketError::Io(e.to_string()))?;
+    }
+    let data = serde_json::to_vec_pretty(&ks).map_err(|e| PocketError::Io(e.to_string()))?;
+    fs::write(&path, data).map_err(|e| PocketError::Io(e.to_string()))?;
+    addr_from_mnemonic(mnemonic, hrp)
+}
+
 pub fn balance(password: &str, rpc: Option<String>, token: Option<String>) -> Result<String, PocketError> {
     let info = load_keystore(password)?;
-    let rpc_base = rpc.unwrap_or_else(|| "https://127.0.0.1:8645".to_string());
+    let cfg = load_config().unwrap_or_default();
+    let rpc_base = rpc.or(cfg.rpc_base.clone()).unwrap_or_else(|| "https://127.0.0.1:8645".to_string());
     let client = rpc_client()?;
     let req = client
         .post(format!("{}/getBalance", rpc_base.trim_end_matches('/')))
         .json(&serde_json::json!({"addr": info.address}));
-    rpc_send(req, token)
+    rpc_send(req, token.or(cfg.token))
 }
 
 pub fn chain_head(rpc: Option<String>, token: Option<String>) -> Result<String, PocketError> {
-    let rpc_base = rpc.unwrap_or_else(|| "https://127.0.0.1:8645".to_string());
+    let cfg = load_config().unwrap_or_default();
+    let rpc_base = rpc.or(cfg.rpc_base.clone()).unwrap_or_else(|| "https://127.0.0.1:8645".to_string());
     let client = rpc_client()?;
     let req = client.get(format!("{}/weave/chain/head", rpc_base.trim_end_matches('/')));
-    rpc_send(req, token)
+    rpc_send(req, token.or(cfg.token))
 }
 
 pub fn difficulty(rpc: Option<String>, token: Option<String>) -> Result<String, PocketError> {
-    let rpc_base = rpc.unwrap_or_else(|| "https://127.0.0.1:8645".to_string());
+    let cfg = load_config().unwrap_or_default();
+    let rpc_base = rpc.or(cfg.rpc_base.clone()).unwrap_or_else(|| "https://127.0.0.1:8645".to_string());
     let client = rpc_client()?;
     let req = client.get(format!("{}/getDifficulty", rpc_base.trim_end_matches('/')));
-    rpc_send(req, token)
+    rpc_send(req, token.or(cfg.token))
 }
 
 fn rpc_client() -> Result<Client, PocketError> {

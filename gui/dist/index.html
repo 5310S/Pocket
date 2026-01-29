@@ -42,6 +42,23 @@
       </div>
     </section>
     <section>
+      <h3>Config & Payout</h3>
+      <div class="row" style="flex-wrap:wrap; gap:8px;">
+        <input id="rpc" placeholder="RPC (default https://127.0.0.1:8645)" style="flex:1; min-width:240px;">
+        <input id="token" placeholder="Bearer token (optional)" style="flex:1; min-width:200px;">
+      </div>
+      <div class="row" style="flex-wrap:wrap; gap:8px; margin-top:8px;">
+        <input id="payout" placeholder="Payout address (pc/tpc)" style="flex:1; min-width:240px;">
+        <input id="att" placeholder="Attestation token (optional)" style="flex:1; min-width:200px;">
+      </div>
+      <div class="row">
+        <button id="save-config">Save Config</button>
+        <button id="show-config">Show Config</button>
+        <button id="save-profile">Save Profile</button>
+        <button id="show-profile">Show Profile</button>
+      </div>
+    </section>
+    <section>
       <h3>Output</h3>
       <pre id="output">(nothing yet)</pre>
     </section>
@@ -82,6 +99,22 @@
     };
     document.getElementById('diff').onclick = () => {
       call('cmd_difficulty', { rpc: 'https://127.0.0.1:8645', token: null });
+    };
+    document.getElementById('save-config').onclick = () => {
+      const rpc = document.getElementById('rpc').value || null;
+      const token = document.getElementById('token').value || null;
+      call('cmd_set_config', { rpc, token });
+    };
+    document.getElementById('show-config').onclick = () => {
+      call('cmd_show_config', {});
+    };
+    document.getElementById('save-profile').onclick = () => {
+      const address = document.getElementById('payout').value;
+      const attestation = document.getElementById('att').value || null;
+      call('cmd_set_profile', { address, attestation });
+    };
+    document.getElementById('show-profile').onclick = () => {
+      call('cmd_show_profile', {});
     };
   </script>
 </body>

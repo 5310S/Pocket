@@ -1,5 +1,9 @@
 use clap::{Parser, Subcommand};
-use pocket_lib::{addr_from_mnemonic, balance, gen_key, init_keystore, load_keystore, chain_head, difficulty, PocketError};
+use pocket_lib::{
+    addr_from_mnemonic, balance, chain_head, difficulty, export_mnemonic, gen_key, import_mnemonic,
+    init_keystore, load_config, load_keystore, load_profile, save_config, save_profile, Config,
+    PocketError, Profile,
+};
 
 #[derive(Parser)]
 #[command(name = "pocket", version, about = "Pocket wallet for Peace/Weave")]
@@ -25,6 +29,38 @@ enum Commands {
         /// Mnemonic words (quoted string)
         mnemonic: String,
     },
+    /// Import mnemonic into keystore
+    Import {
+        #[arg(long)]
+        password: String,
+        #[arg(long)]
+        mnemonic: String,
+        #[arg(long, default_value = "tpc")]
+        hrp: String,
+    },
+    /// Export mnemonic from keystore
+    Export {
+        #[arg(long)]
+        password: String,
+    },
+    /// Save RPC/token config
+    SetConfig {
+        #[arg(long)]
+        rpc: Option<String>,
+        #[arg(long)]
+        token: Option<String>,
+    },
+    /// Save mining payout profile
+    SetPayout {
+        #[arg(long)]
+        address: String,
+        #[arg(long)]
+        attestation: Option<String>,
+    },
+    /// Show saved config
+    ShowConfig,
+    /// Show saved profile
+    ShowProfile,
     /// Initialize an encrypted keystore
     Init {
         #[arg(long)]
@@ -76,6 +112,12 @@ fn main() {
         Commands::Addr { mnemonic } => addr_from_mnemonic(&mnemonic, hrp).map(|i| serde_json::to_string_pretty(&i).unwrap()),
         Commands::Init { password, hrp } => init_keystore(&password, &hrp).map(|i| serde_json::to_string_pretty(&i).unwrap()),
         Commands::Show { password } => load_keystore(&password).map(|i| serde_json::to_string_pretty(&i).unwrap()),
+        Commands::Import { password, mnemonic, hrp } => import_mnemonic(&password, &mnemonic, &hrp).map(|i| serde_json::to_string_pretty(&i).unwrap()),
+        Commands::Export { password } => export_mnemonic(&password).map(|m| serde_json::to_string_pretty(&serde_json::json!({"mnemonic": m})).unwrap()),
+        Commands::SetConfig { rpc, token } => save_config(&Config { rpc_base: rpc, token }).map(|_| "{\"status\":\"ok\"}".into()),
+        Commands::ShowConfig => load_config().map(|c| serde_json::to_string_pretty(&c).unwrap()),
+        Commands::SetPayout { address, attestation } => save_profile(&Profile { payout_address: Some(address), attestation_token: attestation }).map(|_| "{\"status\":\"ok\"}".into()),
+        Commands::ShowProfile => load_profile().map(|p| serde_json::to_string_pretty(&p).unwrap()),
         Commands::Balance { password, rpc, token } => balance(&password, rpc, token),
         Commands::Head { rpc, token } => chain_head(rpc, token),
         Commands::Difficulty { rpc, token } => difficulty(rpc, token),
