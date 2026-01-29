@@ -23,7 +23,7 @@ Pocket Wallet Plan
    [ ] Simple API/IPC for Weave to fetch payout address
 
 5) UI/UX surface (initial)
-   [x] CLI commands: balance, init, show; (send, set-payout, export/import pending)
+   [x] CLI commands: keygen, addr, init, show, balance; (send, set-payout, export/import pending)
    [ ] Optional local HTTP API stub for later front-end use
 
 6) Security & storage
