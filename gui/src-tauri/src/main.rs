@@ -2,7 +2,8 @@
 
 use pocket_lib::{
     balance, chain_head, difficulty, export_mnemonic, import_mnemonic, init_keystore, load_config,
-    load_keystore, load_profile, save_config, save_profile, Config, PocketError, Profile,
+    load_keystore, load_profile, save_config, save_profile, submit_tx, build_and_sign_transfer,
+    Config, PocketError, Profile, TxBuildRequest, BuildKind,
 };
 
 fn map_err(e: PocketError) -> String { e.to_string() }
@@ -64,6 +65,20 @@ fn cmd_show_profile() -> Result<String, String> {
     load_profile().map(|p| serde_json::to_string_pretty(&p).unwrap()).map_err(map_err)
 }
 
+#[tauri::command]
+fn cmd_send(password: String, to: String, amount: u64, fee: u64, nonce: Option<u64>, timestamp: Option<u64>, chain_id: Option<String>, rpc: Option<String>, token: Option<String>) -> Result<String, String> {
+    let env = build_and_sign_transfer(&password, TxBuildRequest {
+        kind: BuildKind::Transfer { to, amount },
+        fee,
+        nonce,
+        timestamp,
+        chain_id,
+        memo: None,
+    }, rpc.clone(), token.clone()).map_err(map_err)?;
+    let res = submit_tx(rpc, token, &env.tx).map_err(map_err)?;
+    Ok(serde_json::to_string_pretty(&serde_json::json!({"tx_id": env.tx_id, "submit": res})).unwrap())
+}
+
 fn main() {
     tauri::Builder::default()
         .invoke_handler(tauri::generate_handler![
@@ -78,6 +93,7 @@ fn main() {
             cmd_show_config,
             cmd_set_profile,
             cmd_show_profile,
+            cmd_send,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri app");

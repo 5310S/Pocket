@@ -24,6 +24,7 @@ dirs = "5"
 tiny_http = "0.12"
 serde_yaml = "0.9"
 sha2 = "0.10"
+strum = { version = "0.26", features = ["derive"] }
 
 [lib]
 name = "pocket_lib"

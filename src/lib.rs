@@ -14,6 +14,7 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use reqwest::blocking::Client;
 use sha2::{Digest, Sha256};
+use strum::{Display, EnumString};
 
 #[derive(Debug, Error)]
 pub enum PocketError {
@@ -62,6 +63,13 @@ pub struct Profile {
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct BalanceInfo {
+    pub addr: String,
+    pub balance: u64,
+    pub nonce: u64,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct TxEnvelope {
     pub tx: serde_json::Value,
     pub tx_id: String,
@@ -69,13 +77,21 @@ pub struct TxEnvelope {
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct TxBuildRequest {
-    pub to: String,
-    pub amount: u64,
+    pub kind: BuildKind,
     pub fee: u64,
     pub nonce: Option<u64>,
     pub timestamp: Option<u64>,
     pub chain_id: Option<String>,
     pub memo: Option<String>,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, EnumString, Display)]
+#[strum(serialize_all = "kebab-case")]
+pub enum BuildKind {
+    Transfer { to: String, amount: u64 },
+    Stake { amount: u64, payout: String, commission_bps: u16 },
+    Unbond { amount: u64 },
+    UpdateValidator { payout: Option<String>, commission_bps: Option<u16> },
 }
 
 fn hrp_valid(hrp: &str) -> bool {
@@ -271,6 +287,24 @@ pub fn balance(password: &str, rpc: Option<String>, token: Option<String>) -> Re
     rpc_send(req, token.or(cfg.token))
 }
 
+pub fn fetch_balance(addr: &str, rpc: Option<String>, token: Option<String>) -> Result<BalanceInfo, PocketError> {
+    let cfg = load_config().unwrap_or_default();
+    let rpc_base = rpc.or(cfg.rpc_base.clone()).unwrap_or_else(|| "https://127.0.0.1:8645".to_string());
+    let client = rpc_client()?;
+    let mut req = client
+        .post(format!("{}/getBalance", rpc_base.trim_end_matches('/')))
+        .json(&serde_json::json!({"addr": addr}));
+    if let Some(t) = token.or(cfg.token).or_else(|| std::env::var("LANTERN_HTTP_TOKEN").ok()) {
+        req = req.bearer_auth(t);
+    }
+    let resp = req.send().map_err(|e| PocketError::Rpc(e.to_string()))?;
+    if !resp.status().is_success() {
+        return Err(PocketError::Rpc(format!("http {}", resp.status())));
+    }
+    let txt = resp.text().map_err(|e| PocketError::Rpc(e.to_string()))?;
+    serde_json::from_str(&txt).map_err(|e| PocketError::Rpc(e.to_string()))
+}
+
 pub fn chain_head(rpc: Option<String>, token: Option<String>) -> Result<String, PocketError> {
     let cfg = load_config().unwrap_or_default();
     let rpc_base = rpc.or(cfg.rpc_base.clone()).unwrap_or_else(|| "https://127.0.0.1:8645".to_string());
@@ -326,13 +360,22 @@ fn tx_id_bytes(tx: &serde_json::Value) -> Result<[u8; 32], PocketError> {
 pub fn build_and_sign_transfer(
     password: &str,
     req: TxBuildRequest,
+    rpc: Option<String>,
+    token: Option<String>,
 ) -> Result<TxEnvelope, PocketError> {
     let info = load_keystore(password)?;
     let chain_id = req.chain_id.unwrap_or_else(|| "peace-testnet".into());
+    let chosen_nonce = match req.nonce {
+        Some(n) => n,
+        None => {
+            let bal = fetch_balance(&info.address, rpc.clone(), token.clone())?;
+            bal.nonce
+        }
+    };
     // Construct minimal tx map per spec.
     let mut tx_map = serde_json::Map::new();
     tx_map.insert("from".into(), serde_json::Value::String(info.address.clone()));
-    tx_map.insert("nonce".into(), serde_json::Value::Number((req.nonce.unwrap_or(0)).into()));
+    tx_map.insert("nonce".into(), serde_json::Value::Number(serde_json::Number::from(chosen_nonce)));
     tx_map.insert(
         "fee".into(),
         serde_json::Value::Number(serde_json::Number::from(req.fee)),
@@ -343,13 +386,13 @@ pub fn build_and_sign_transfer(
     );
     tx_map.insert("chain_id".into(), serde_json::Value::String(chain_id.clone()));
     tx_map.insert("pubkey_hex".into(), serde_json::Value::String(info.public_key_hex.clone()));
-    let kind = serde_json::json!({
-        "Transfer": {
-            "to": req.to,
-            "amount": req.amount,
-        }
-    });
-    tx_map.insert("kind".into(), kind);
+    let kind_val = match req.kind {
+        BuildKind::Transfer { to, amount } => serde_json::json!({"Transfer": {"to": to, "amount": amount}}),
+        BuildKind::Stake { amount, payout, commission_bps } => serde_json::json!({"Stake": {"amount": amount, "payout": payout, "commission_bps": commission_bps}}),
+        BuildKind::Unbond { amount } => serde_json::json!({"Unbond": {"amount": amount}}),
+        BuildKind::UpdateValidator { payout, commission_bps } => serde_json::json!({"UpdateValidator": {"payout": payout, "commission_bps": commission_bps}}),
+    };
+    tx_map.insert("kind".into(), kind_val);
 
     let mut tx_val = serde_json::Value::Object(tx_map);
     let msg = tx_signing_bytes(&tx_val)?;

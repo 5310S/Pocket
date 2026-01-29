@@ -144,14 +144,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         Commands::Difficulty { rpc, token } => difficulty(rpc, token),
         Commands::Send { password, to, amount, fee, nonce, timestamp, chain_id, rpc, token } => {
             let env = build_and_sign_transfer(&password, TxBuildRequest {
-                to,
-                amount,
+                kind: pocket_lib::BuildKind::Transfer { to, amount },
                 fee,
                 nonce,
                 timestamp,
                 chain_id,
                 memo: None,
-            })?;
+            }, rpc.clone(), token.clone())?;
             let submit = submit_tx(rpc, token, &env.tx)?;
             Ok(serde_json::to_string_pretty(&serde_json::json!({"tx_id": env.tx_id, "submit": submit})).unwrap())
         }
