@@ -1,0 +1,15 @@
+[package]
+name = "pocket-gui"
+version = "0.1.0"
+edition = "2021"
+authors = ["5310S <dev@5310s.com>"]
+license = "MIT OR Apache-2.0"
+
+[dependencies]
+tauri = { version = "2.5.1", features = [] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+pocket_lib = { path = "../../", package = "pocket" }
+
+[build-dependencies]
+tauri-build = { version = "2.5.1" }

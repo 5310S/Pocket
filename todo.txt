@@ -25,6 +25,7 @@ Pocket Wallet Plan
 5) UI/UX surface (initial)
    [x] CLI commands: keygen, addr, init, show, balance; (send, set-payout, export/import pending)
    [ ] Optional local HTTP API stub for later front-end use
+   [x] macOS GUI scaffold (Tauri) with init/show/balance bindings
 
 6) Security & storage
    [ ] Encrypted keystore file; lock/unlock flow

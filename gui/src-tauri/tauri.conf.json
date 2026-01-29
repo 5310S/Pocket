@@ -1,0 +1,24 @@
+{
+  "productName": "Pocket",
+  "version": "0.1.0",
+  "identifier": "com.pocket.app",
+  "build": {
+    "frontendDist": "../dist",
+    "beforeBuildCommand": "",
+    "beforeDevCommand": ""
+  },
+  "app": {
+    "windows": [
+      {
+        "label": "main",
+        "title": "Pocket Wallet",
+        "width": 480,
+        "height": 640,
+        "resizable": true
+      }
+    ],
+    "security": {
+      "csp": null
+    }
+  }
+}
