@@ -9,35 +9,38 @@ Pocket Wallet Plan (macOS focus)
 
 2) Chain RPC integration (via Lantern)
    [x] Query balance: /getBalance
-   [ ] Chain status: /weave/chain/head, /getDifficulty
+   [x] Chain status: /weave/chain/head, /getDifficulty
    [x] Bearer auth handling (server-side via headers/env)
 
 3) Transaction building & signing
-   [ ] Build Peace txs offline (inputs/outputs/fees)
-   [ ] Sign locally; submit via Lantern RPC
-   [ ] Validate HRP and fee sanity
+   [x] Build/sign/submit transfer
+   [ ] Build/sign/submit stake
+   [ ] Build/sign/submit unbond
+   [ ] Build/sign/submit update-validator
+   [ ] Nonce helper uses pending pool (not just ledger nonce)
 
 4) Mining payout support for Weave
-   [ ] Select/store payout address from wallet
-   [ ] Miner profile (payout address + optional attestation token)
-   [ ] Simple API/IPC for Weave to fetch payout address
+   [x] Select/store payout address and attestation token
+   [ ] Simple API/IPC for Weave to fetch payout address (beyond current config/profile files)
 
 5) UI/UX surface (macOS)
-   [x] Tauri GUI scaffold (init/show/balance)
-   [x] Add chain status display (head/difficulty)
-   [ ] Add send flow (build/sign/submit)
-   [x] Add payout selection + export/import flows (UI + storage; signing still pending)
+   [x] Tauri GUI scaffold (init/show/balance/head/difficulty)
+   [x] Send form for transfers
+   [ ] Tx kind selector + dynamic fields (stake/unbond/update-validator)
+   [ ] Lock/unlock flow (clear in-memory password, disable actions, auto-lock timer)
+   [ ] Persist GUI settings (RPC/token/payout) and prefill on load
+   [ ] Error banners and validation on inputs
 
 6) Security & storage
-   [ ] Lock/unlock flow in GUI
    [ ] Hardware keystore hook (future)
+   [ ] Document PBKDF/crypto params (Argon2id + AES-GCM)
 
 7) Config & env
-   [ ] Network select (testnet/mainnet), RPC URL, token stored in app config
    [ ] Rate-limit/backoff for RPC
+   [ ] Ensure HRP/chain-id alignment checks on sends
 
 8) Tests & tooling
-   [ ] Unit tests: key derivation, address encoding, signing/verification
+   [ ] Unit tests: key derivation, address encoding, signing determinism, build_kind serialization
    [ ] Integration tests against local Lantern RPC (mock or real)
    [ ] Lint/format CI
 
