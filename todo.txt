@@ -5,7 +5,7 @@ Pocket Wallet Plan (macOS focus)
    [x] Generate ed25519 keys from mnemonic/seed
    [x] Bech32 encode addresses (pc/tpc)
    [x] Encrypted keystore (password + Argon2id + AES-GCM)
-   [ ] Export/import (seed phrase or raw seed + metadata)
+   [x] Export/import (seed phrase)
 
 2) Chain RPC integration (via Lantern)
    [x] Query balance: /getBalance
