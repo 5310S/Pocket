@@ -29,7 +29,7 @@
   </style>
 </head>
 <body>
-  <div id="onboard" style="display:none;">
+  <div id="onboard" style="display:flex;">
     <div class="panel">
       <div>
         <h2>Create a new wallet</h2>
@@ -397,7 +397,6 @@
     function showOnboard() { document.getElementById('onboard').style.display = 'flex'; }
     function hideOnboard() { document.getElementById('onboard').style.display = 'none'; }
     function onboardDone(password) {
-      localStorage.setItem('pocket_onboarded', '1');
       document.getElementById('password').value = password;
       hideOnboard();
       clearError();
@@ -427,9 +426,7 @@
     loadSettings();
     hydrateFromBackend().then(pingRpc);
     setLocked(true);
-    if (!localStorage.getItem('pocket_onboarded')) {
-      showOnboard();
-    }
+    showOnboard();
   </script>
 </body>
 </html>
