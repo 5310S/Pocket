@@ -30,9 +30,17 @@
 </head>
 <body>
   <div id="onboard" style="display:flex;">
-    <div class="panel">
-      <div>
-        <h2>Create a new wallet</h2>
+    <div class="panel" style="grid-template-columns:1fr; gap:12px;">
+      <div style="text-align:center;">
+        <h2 style="margin:0;">Pocket</h2>
+        <p style="margin:4px 0 14px;">A place to put your Peace</p>
+        <div class="row" style="justify-content:center; gap:12px;">
+          <button id="ob-btn-create" style="width:160px;">Create</button>
+          <button id="ob-btn-import" style="width:160px;">Restore</button>
+        </div>
+      </div>
+      <div id="ob-create-panel" style="display:none;">
+        <h3>Create a new wallet</h3>
         <p>Generates a fresh mnemonic and stores it in your encrypted keystore.</p>
         <label>Password</label>
         <input id="ob-new-password" type="password" placeholder="Set a password">
@@ -40,9 +48,8 @@
         <input id="ob-new-hrp" value="tpc">
         <button id="ob-create">Create Wallet</button>
       </div>
-      <div class="divider"></div>
-      <div>
-        <h2>Import existing wallet</h2>
+      <div id="ob-import-panel" style="display:none;">
+        <h3>Restore existing wallet</h3>
         <p>Paste your mnemonic to restore an existing account.</p>
         <label>Password</label>
         <input id="ob-import-password" type="password" placeholder="Set a password for this device">
@@ -50,7 +57,7 @@
         <input id="ob-import-mnemonic" placeholder="twelve or twenty-four words">
         <label>HRP</label>
         <input id="ob-import-hrp" value="tpc">
-        <button id="ob-import">Import Wallet</button>
+        <button id="ob-import">Restore Wallet</button>
       </div>
     </div>
   </div>
@@ -396,6 +403,12 @@
     // Onboarding
     function showOnboard() { document.getElementById('onboard').style.display = 'flex'; }
     function hideOnboard() { document.getElementById('onboard').style.display = 'none'; }
+    function setObMode(mode) {
+      document.getElementById('ob-create-panel').style.display = mode === 'create' ? 'block' : 'none';
+      document.getElementById('ob-import-panel').style.display = mode === 'import' ? 'block' : 'none';
+    }
+    document.getElementById('ob-btn-create').onclick = () => setObMode('create');
+    document.getElementById('ob-btn-import').onclick = () => setObMode('import');
     function onboardDone(password) {
       document.getElementById('password').value = password;
       hideOnboard();
