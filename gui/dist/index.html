@@ -31,7 +31,7 @@
 <body>
   <div id="onboard" style="display:flex;">
     <div class="panel" style="grid-template-columns:1fr; gap:12px;">
-      <div style="text-align:center;">
+      <div id="ob-hero" style="text-align:center;">
         <h2 style="margin:0;">Pocket</h2>
         <p style="margin:4px 0 14px;">A place to put your Peace</p>
         <div class="row" style="justify-content:center; gap:12px;">
@@ -410,6 +410,7 @@
     function showOnboard() { document.getElementById('onboard').style.display = 'flex'; }
     function hideOnboard() { document.getElementById('onboard').style.display = 'none'; }
     function setObMode(mode) {
+      document.getElementById('ob-hero').style.display = 'none';
       document.getElementById('ob-create-panel').style.display = mode === 'create' ? 'block' : 'none';
       document.getElementById('ob-import-panel').style.display = mode === 'import' ? 'block' : 'none';
       document.getElementById('ob-mnemonic-panel').style.display = 'none';
@@ -428,6 +429,7 @@
       const hrp = document.getElementById('ob-new-hrp').value || 'tpc';
       if (!pw) { showError('Set a password'); return; }
       try {
+        setStatus('Generating wallet...');
         const res = await invoke('cmd_init', { password: pw, hrp });
         const info = JSON.parse(res);
         document.getElementById('ob-mnemonic').value = info.mnemonic || '(mnemonic unavailable)';
