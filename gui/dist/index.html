@@ -20,9 +20,40 @@
     .dot { width:10px; height:10px; border-radius:50%; background:var(--muted); box-shadow:0 0 0 2px rgba(0,0,0,0.25); }
     .banner { padding:10px 12px; border-radius:10px; background:rgba(255,123,123,0.08); border:1px solid rgba(255,123,123,0.35); color:var(--error); font-size:13px; display:none; }
     .muted { color:var(--muted); font-size:12px; }
+    #onboard { position:fixed; inset:0; background:rgba(5,9,21,0.9); backdrop-filter: blur(12px); display:flex; align-items:center; justify-content:center; z-index:999; }
+    #onboard .panel { background:var(--panel); border:1px solid rgba(255,255,255,0.08); border-radius:14px; padding:22px; width:90%; max-width:780px; box-shadow:0 24px 60px rgba(0,0,0,0.55); display:grid; grid-template-columns:1fr 1fr; gap:16px; }
+    #onboard h2 { margin:0 0 6px; }
+    #onboard p { color:var(--muted); margin:0 0 12px; font-size:13px; }
+    #onboard button { width:100%; margin-top:12px; }
+    #onboard .divider { border-left:1px solid rgba(255,255,255,0.08); }
   </style>
 </head>
 <body>
+  <div id="onboard" style="display:none;">
+    <div class="panel">
+      <div>
+        <h2>Create a new wallet</h2>
+        <p>Generates a fresh mnemonic and stores it in your encrypted keystore.</p>
+        <label>Password</label>
+        <input id="ob-new-password" type="password" placeholder="Set a password">
+        <label>HRP</label>
+        <input id="ob-new-hrp" value="tpc">
+        <button id="ob-create">Create Wallet</button>
+      </div>
+      <div class="divider"></div>
+      <div>
+        <h2>Import existing wallet</h2>
+        <p>Paste your mnemonic to restore an existing account.</p>
+        <label>Password</label>
+        <input id="ob-import-password" type="password" placeholder="Set a password for this device">
+        <label>Mnemonic</label>
+        <input id="ob-import-mnemonic" placeholder="twelve or twenty-four words">
+        <label>HRP</label>
+        <input id="ob-import-hrp" value="tpc">
+        <button id="ob-import">Import Wallet</button>
+      </div>
+    </div>
+  </div>
   <header>
     <h1>Pocket Wallet (macOS demo)</h1>
     <div class="status"><div class="dot" id="dot"></div><span id="status">Ready</span></div>
@@ -362,10 +393,43 @@
       }
     }
 
+    // Onboarding
+    function showOnboard() { document.getElementById('onboard').style.display = 'flex'; }
+    function hideOnboard() { document.getElementById('onboard').style.display = 'none'; }
+    function onboardDone(password) {
+      localStorage.setItem('pocket_onboarded', '1');
+      document.getElementById('password').value = password;
+      hideOnboard();
+      clearError();
+      setLocked(false);
+    }
+    document.getElementById('ob-create').onclick = async () => {
+      const pw = document.getElementById('ob-new-password').value;
+      const hrp = document.getElementById('ob-new-hrp').value || 'tpc';
+      if (!pw) { showError('Set a password'); return; }
+      try {
+        await invoke('cmd_init', { password: pw, hrp });
+        onboardDone(pw);
+      } catch (e) { showError(String(e)); }
+    };
+    document.getElementById('ob-import').onclick = async () => {
+      const pw = document.getElementById('ob-import-password').value;
+      const m = document.getElementById('ob-import-mnemonic').value;
+      const hrp = document.getElementById('ob-import-hrp').value || 'tpc';
+      if (!pw || !m) { showError('Enter password and mnemonic'); return; }
+      try {
+        await invoke('cmd_import', { password: pw, mnemonic: m, hrp });
+        onboardDone(pw);
+      } catch (e) { showError(String(e)); }
+    };
+
     // bootstrap
     loadSettings();
     hydrateFromBackend().then(pingRpc);
     setLocked(true);
+    if (!localStorage.getItem('pocket_onboarded')) {
+      showOnboard();
+    }
   </script>
 </body>
 </html>
