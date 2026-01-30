@@ -46,7 +46,13 @@
         <input id="ob-new-password" type="password" placeholder="Set a password">
         <label>HRP</label>
         <input id="ob-new-hrp" value="tpc">
-        <button id="ob-create">Create Wallet</button>
+        <button id="ob-create">Generate Wallet</button>
+      </div>
+      <div id="ob-mnemonic-panel" style="display:none;">
+        <h3>Your recovery phrase</h3>
+        <p>Write this down and store it securely. Anyone with this phrase can control your funds.</p>
+        <textarea id="ob-mnemonic" readonly style="width:100%; min-height:120px; background:#0b1327; color:var(--text); border-radius:10px; border:1px solid rgba(255,255,255,0.12); padding:10px;"></textarea>
+        <button id="ob-mnemonic-done">I saved my phrase</button>
       </div>
       <div id="ob-import-panel" style="display:none;">
         <h3>Restore existing wallet</h3>
@@ -406,9 +412,11 @@
     function setObMode(mode) {
       document.getElementById('ob-create-panel').style.display = mode === 'create' ? 'block' : 'none';
       document.getElementById('ob-import-panel').style.display = mode === 'import' ? 'block' : 'none';
+      document.getElementById('ob-mnemonic-panel').style.display = 'none';
     }
     document.getElementById('ob-btn-create').onclick = () => setObMode('create');
     document.getElementById('ob-btn-import').onclick = () => setObMode('import');
+    let lastCreatedPassword = '';
     function onboardDone(password) {
       document.getElementById('password').value = password;
       hideOnboard();
@@ -420,9 +428,18 @@
       const hrp = document.getElementById('ob-new-hrp').value || 'tpc';
       if (!pw) { showError('Set a password'); return; }
       try {
-        await invoke('cmd_init', { password: pw, hrp });
-        onboardDone(pw);
+        const res = await invoke('cmd_init', { password: pw, hrp });
+        const info = JSON.parse(res);
+        document.getElementById('ob-mnemonic').value = info.mnemonic || '(mnemonic unavailable)';
+        lastCreatedPassword = pw;
+        document.getElementById('ob-create-panel').style.display = 'none';
+        document.getElementById('ob-mnemonic-panel').style.display = 'block';
+        setStatus('Wallet created');
       } catch (e) { showError(String(e)); }
+    };
+    document.getElementById('ob-mnemonic-done').onclick = () => {
+      if (!lastCreatedPassword) { showError('No wallet generated yet'); return; }
+      onboardDone(lastCreatedPassword);
     };
     document.getElementById('ob-import').onclick = async () => {
       const pw = document.getElementById('ob-import-password').value;
