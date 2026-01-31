@@ -39,7 +39,7 @@
           <button id="ob-btn-import" style="width:200px;">Restore an Existing Wallet</button>
         </div>
       </div>
-      <div id="ob-create-panel" style="display:block;">
+      <div id="ob-create-panel" style="display:none;">
         <h3>Create a new wallet</h3>
         <p>Generates a fresh mnemonic and stores it in your encrypted keystore.</p>
         <label>Password</label>
@@ -54,7 +54,7 @@
         <textarea id="ob-mnemonic" readonly style="width:100%; min-height:120px; background:#0b1327; color:var(--text); border-radius:10px; border:1px solid rgba(255,255,255,0.12); padding:10px;"></textarea>
         <button id="ob-mnemonic-done">I saved my phrase</button>
       </div>
-      <div id="ob-import-panel" style="display:block;">
+      <div id="ob-import-panel" style="display:none;">
         <h3>Restore existing wallet</h3>
         <p>Paste your mnemonic to restore an existing account.</p>
         <label>Password</label>
@@ -413,14 +413,14 @@
     function showOnboard() { document.getElementById('onboard').style.display = 'flex'; }
     function hideOnboard() { document.getElementById('onboard').style.display = 'none'; }
     function setObMode(mode) {
-      if (mode === 'create') {
-        document.getElementById('ob-new-password').focus();
-        document.getElementById('ob-create-panel').scrollIntoView({ behavior: 'smooth' });
-      } else if (mode === 'import') {
-        document.getElementById('ob-import-password').focus();
-        document.getElementById('ob-import-panel').scrollIntoView({ behavior: 'smooth' });
-      }
-      document.getElementById('ob-mnemonic-panel').style.display = 'none';
+      const hero = document.getElementById('ob-hero');
+      const create = document.getElementById('ob-create-panel');
+      const imp = document.getElementById('ob-import-panel');
+      const mnem = document.getElementById('ob-mnemonic-panel');
+      hero.style.display = mode === 'hero' ? 'block' : 'none';
+      create.style.display = mode === 'create' ? 'block' : 'none';
+      imp.style.display = mode === 'import' ? 'block' : 'none';
+      mnem.style.display = 'none';
     }
     document.getElementById('ob-btn-create').onclick = () => {
       setObMode('create');
