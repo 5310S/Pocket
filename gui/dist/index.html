@@ -5,60 +5,337 @@
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>Pocket Wallet</title>
   <style>
-    :root { --bg:#050915; --panel:#0f1a33; --accent:#4de1ff; --text:#e9eef7; --muted:#a9b7d4; --error:#ff7b7b; --ok:#7dffb5; }
-    body { margin:0; font-family: 'Inter', system-ui, -apple-system, sans-serif; background:var(--bg); color:var(--text); }
-    header { padding:18px 20px; background:linear-gradient(135deg,#0b1227,#0d1c3a); border-bottom:1px solid rgba(255,255,255,0.08); display:flex; align-items:center; justify-content:space-between; gap:14px; }
-    h1 { margin:0; font-size:22px; }
-    main { max-width:700px; margin:30px auto 80px; padding:0 20px; display:grid; gap:16px; }
-    section { background:var(--panel); border:1px solid rgba(255,255,255,0.07); border-radius:12px; padding:16px 18px; box-shadow:0 12px 32px rgba(0,0,0,0.35); }
-    label { display:block; font-size:13px; color:var(--muted); margin-bottom:4px; }
-    input, select { width:100%; padding:10px; border-radius:8px; border:1px solid rgba(255,255,255,0.12); background:#0b1327; color:var(--text); }
-    button { margin-top:10px; padding:10px 14px; border:none; border-radius:10px; background:var(--accent); color:#04101f; font-weight:700; cursor:pointer; }
-    pre { background:#0a142a; padding:10px; border-radius:8px; overflow:auto; color:#dfe7f7; }
-    .row { display:flex; gap:10px; align-items:center; }
+    :root {
+      --bg-0:#070b16;
+      --bg-1:#0e1527;
+      --bg-2:#14203a;
+      --card:#0f1728;
+      --card-2:#121c33;
+      --line:rgba(255,255,255,0.08);
+      --line-strong:rgba(255,255,255,0.14);
+      --accent:#67d4ff;
+      --accent-2:#3aa1ff;
+      --accent-3:#ffb454;
+      --text:#eef2ff;
+      --muted:#a5b3cf;
+      --error:#ff6b6b;
+      --ok:#62f0b2;
+      --shadow:0 24px 60px rgba(0,0,0,0.45);
+    }
+
+    * { box-sizing:border-box; }
+
+    html, body { height:100%; }
+
+    body {
+      margin:0;
+      font-family:"Avenir Next","Futura","Gill Sans","Trebuchet MS",sans-serif;
+      color:var(--text);
+      background:radial-gradient(900px 700px at 15% -15%, #1b2748 0%, #0f1830 45%, var(--bg-0) 100%);
+      letter-spacing:0.2px;
+    }
+
+    header {
+      padding:20px 26px;
+      background:linear-gradient(135deg,#0f1a31,#111e3b);
+      border-bottom:1px solid var(--line);
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap:14px;
+    }
+
+    h1 { margin:0; font-size:22px; font-weight:700; }
+    h3 { margin:0 0 10px; font-size:18px; }
+    h4 { margin:0 0 8px; font-size:16px; }
+
+    main {
+      max-width:980px;
+      margin:28px auto 80px;
+      padding:0 24px;
+      display:grid;
+      gap:16px;
+    }
+
+    section {
+      background:linear-gradient(160deg, var(--card), var(--card-2));
+      border:1px solid var(--line);
+      border-radius:16px;
+      padding:18px 20px;
+      box-shadow:var(--shadow);
+      animation:revealUp 0.6s ease-out both;
+    }
+
+    main > section:nth-of-type(1) { animation-delay:0.02s; }
+    main > section:nth-of-type(2) { animation-delay:0.06s; }
+    main > section:nth-of-type(3) { animation-delay:0.1s; }
+    main > section:nth-of-type(4) { animation-delay:0.14s; }
+    main > section:nth-of-type(5) { animation-delay:0.18s; }
+    main > section:nth-of-type(6) { animation-delay:0.22s; }
+
+    label { display:block; font-size:13px; color:var(--muted); margin-bottom:6px; }
+
+    input, select, textarea {
+      width:100%;
+      padding:11px 12px;
+      border-radius:10px;
+      border:1px solid var(--line-strong);
+      background:#0d1528;
+      color:var(--text);
+      outline:none;
+      transition:border-color 0.2s ease, box-shadow 0.2s ease;
+    }
+
+    input:focus, select:focus, textarea:focus {
+      border-color:rgba(103,212,255,0.7);
+      box-shadow:0 0 0 3px rgba(103,212,255,0.15);
+    }
+
+    button {
+      margin-top:10px;
+      padding:11px 16px;
+      border:none;
+      border-radius:12px;
+      background:linear-gradient(180deg,var(--accent),var(--accent-2));
+      color:#08101f;
+      font-weight:700;
+      cursor:pointer;
+      box-shadow:0 10px 20px rgba(58,161,255,0.25), inset 0 1px 0 rgba(255,255,255,0.35);
+      transition:transform 0.12s ease, box-shadow 0.2s ease, filter 0.2s ease;
+    }
+
+    button:hover { transform:translateY(-1px); filter:brightness(1.03); }
+    button:active { transform:translateY(0); }
+    button:disabled { opacity:0.6; cursor:not-allowed; filter:saturate(0.6); }
+
+    .btn-danger {
+      background:linear-gradient(180deg,#ff7a7a,#e85a5a);
+      color:#160707;
+      box-shadow:0 10px 20px rgba(255,122,122,0.25), inset 0 1px 0 rgba(255,255,255,0.35);
+    }
+
+    .btn-ghost {
+      background:transparent;
+      border:1px solid var(--line-strong);
+      color:var(--text);
+      box-shadow:none;
+    }
+
+    .btn-inline { width:auto; }
+
+    pre {
+      background:#0b1324;
+      border:1px solid var(--line);
+      padding:12px;
+      border-radius:10px;
+      overflow:auto;
+      color:#dfe7f7;
+    }
+
+    .row { display:flex; gap:10px; align-items:center; flex-wrap:wrap; }
+    .row-between { justify-content:space-between; gap:12px; margin-top:18px; }
+    .row-tight { gap:8px; align-items:center; }
+    .mt-12 { margin-top:12px; }
+    .flex-1 { flex:1; }
+
     .status { font-size:13px; color:var(--muted); display:flex; align-items:center; gap:8px; }
     .dot { width:10px; height:10px; border-radius:50%; background:var(--muted); box-shadow:0 0 0 2px rgba(0,0,0,0.25); }
-    .banner { padding:10px 12px; border-radius:10px; background:rgba(255,123,123,0.08); border:1px solid rgba(255,123,123,0.35); color:var(--error); font-size:13px; display:none; }
+
+    .banner {
+      padding:10px 12px;
+      border-radius:10px;
+      background:rgba(255,107,107,0.12);
+      border:1px solid rgba(255,107,107,0.35);
+      color:var(--error);
+      font-size:13px;
+      display:none;
+    }
+
     .muted { color:var(--muted); font-size:12px; }
-    #onboard { position:fixed; inset:0; background:rgba(5,9,21,0.9); backdrop-filter: blur(12px); display:flex; align-items:center; justify-content:center; z-index:999; }
-    #onboard .panel { background:var(--panel); border:1px solid rgba(255,255,255,0.08); border-radius:14px; padding:22px; width:90%; max-width:780px; box-shadow:0 24px 60px rgba(0,0,0,0.55); display:grid; grid-template-columns:1fr; grid-auto-rows:auto; gap:16px; }
-    #onboard h2 { margin:0 0 6px; }
-    #onboard p { color:var(--muted); margin:0 0 12px; font-size:13px; }
+
+    #onboard {
+      position:fixed;
+      inset:0;
+      padding:28px 24px;
+      background:rgba(7,11,22,0.92);
+      backdrop-filter: blur(14px);
+      display:flex;
+      align-items:flex-start;
+      justify-content:center;
+      z-index:999;
+      overflow:auto;
+    }
+
+    #onboard .panel {
+      background:linear-gradient(160deg,#0e162c,#101c35 70%);
+      border:1px solid var(--line);
+      border-radius:18px;
+      padding:28px 30px;
+      width:min(96vw, 1040px);
+      min-height:440px;
+      margin-top:min(8vh, 72px);
+      box-shadow:0 28px 70px rgba(0,0,0,0.55);
+      display:grid;
+      grid-template-columns:repeat(2, minmax(0, 1fr));
+      grid-auto-rows:minmax(0, 1fr);
+      grid-template-areas:
+        "hero create"
+        "login restore";
+      gap:20px 24px;
+      animation:panelIn 0.5s ease-out;
+      align-items:stretch;
+    }
+
+    #onboard h2 { margin:0 0 8px; font-size:40px; letter-spacing:0.8px; }
+    #onboard p { color:var(--muted); margin:0 0 12px; font-size:16px; }
     #onboard button { width:100%; margin-top:12px; }
-    #onboard .divider { border-left:1px solid rgba(255,255,255,0.08); }
+
+    .tile, .action-card, #ob-warning-panel, #ob-create-panel, #ob-import-panel, #ob-mnemonic-panel {
+      background:linear-gradient(160deg, rgba(15,23,40,0.95), rgba(16,28,50,0.9));
+      border:1px solid var(--line);
+      border-radius:14px;
+      padding:18px;
+      box-shadow:inset 0 1px 0 rgba(255,255,255,0.04);
+      text-align: center;
+    }
+
+    #ob-hero {
+      grid-area:hero;
+      text-align:center;
+      display:flex;
+      flex-direction:column;
+      justify-content:center;
+      align-items:center;
+      width:100%;
+      height:100%;
+    }
+
+    #ob-login-card {
+      grid-area:login;
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      text-align: center;
+      
+    }
+
+    #ob-login-card button { width:100%; max-width:260px; }
+
+    #ob-actions { display:contents; }
+    #ob-create-card { grid-area:create; }
+    #ob-import-card { grid-area:restore; }
+
+    .action-card h4 { margin:0 0 6px; font-size:16px; }
+    .action-card p { margin:0 0 12px; font-size:13px; color:var(--muted); }
+    .action-card button { margin-top:0; }
+
+    .ob-list { margin:0 0 14px 18px; color:var(--muted); font-size:13px; }
+
+    #ob-mnemonic {
+      min-height:120px;
+      background:#0d1528;
+      border:1px solid var(--line-strong);
+      color:var(--text);
+      border-radius:10px;
+      padding:10px;
+    }
+
+    footer { color:var(--muted); font-size:12px; padding:14px 0 20px; text-align:center; }
+
+    @media (max-width: 860px) {
+      header { padding:18px 20px; }
+      main { padding:0 18px; }
+      #onboard { padding:20px 16px; }
+      #onboard .panel {
+        grid-template-columns:1fr;
+        grid-template-areas:
+          "hero"
+          "create"
+          "restore"
+          "login";
+        padding:22px;
+      }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      #onboard .panel { animation:none; }
+      section { animation:none; }
+    }
+
+    @keyframes panelIn {
+      from { transform: translateY(12px); opacity: 0; }
+      to { transform: translateY(0); opacity: 1; }
+    }
+
+    @keyframes revealUp {
+      from { transform: translateY(10px); opacity: 0; }
+      to { transform: translateY(0); opacity: 1; }
+    }
   </style>
 </head>
 <body>
-  <div id="onboard" style="display:flex;">
-    <div class="panel" style="grid-template-columns:1fr; gap:12px;">
-      <div id="ob-hero" style="text-align:center;">
-        <h2 style="margin:0;">Pocket</h2>
-        <p style="margin:4px 0 14px;">A place to put your Peace</p>
-        <div class="row" style="justify-content:center; gap:12px;">
-          <button id="ob-btn-create" style="width:200px;">Create a New Wallet</button>
-          <button id="ob-btn-import" style="width:200px;">Restore an Existing Wallet</button>
+  <div id="onboard">
+    <div class="panel">
+      <div id="ob-hero" class="tile">
+        <h2>Pocket</h2>
+        <p>A place to put your Peace</p>
+      </div>
+      <div id="ob-login-card" class="tile">
+        <button id="ob-login">Login</button>
+      </div>
+      <div id="ob-actions">
+        <div id="ob-create-card" class="action-card">
+          <h4>Create a New Wallet</h4>
+          <p>Generate a new recovery phrase and secure it on this device.</p>
+          <button id="ob-btn-create">Create a New Wallet</button>
+        </div>
+        <div id="ob-import-card" class="action-card">
+          <h4>Restore an Existing Wallet</h4>
+          <p>Import your existing recovery phrase to access funds.</p>
+          <button id="ob-btn-import">Restore an Existing Wallet</button>
+        </div>
+      </div>
+      <div id="ob-warning-panel" style="display:none;">
+        <h3>Read this before you continue</h3>
+        <p>Your wallet will be generated with a 24-word recovery phrase.</p>
+        <ul class="ob-list">
+          <li>It will be shown only once.</li>
+          <li>If you lose it, you cannot recover your wallet.</li>
+          <li>Write it down and store it somewhere safe and offline.</li>
+        </ul>
+        <div class="row row-between">
+          <button id="ob-warning-back" class="btn-ghost btn-inline">Go Back</button>
+          <button id="ob-warning-proceed" class="btn-danger btn-inline">Proceed!</button>
         </div>
       </div>
       <div id="ob-create-panel" style="display:none;">
         <h3>Create a new wallet</h3>
-        <p>Generates a fresh mnemonic and stores it in your encrypted keystore.</p>
-        <label>Password</label>
-        <input id="ob-new-password" type="password" placeholder="Set a password">
+        <p>Generates a fresh mnemonic and a device password for this wallet.</p>
+        <div class="muted">Your device password is generated automatically and shown once.</div>
         <label>HRP</label>
         <input id="ob-new-hrp" value="tpc">
         <button id="ob-create">Generate Wallet</button>
       </div>
       <div id="ob-mnemonic-panel" style="display:none;">
-        <h3>Your recovery phrase</h3>
-        <p>Write this down and store it securely. Anyone with this phrase can control your funds.</p>
-        <textarea id="ob-mnemonic" readonly style="width:100%; min-height:120px; background:#0b1327; color:var(--text); border-radius:10px; border:1px solid rgba(255,255,255,0.12); padding:10px;"></textarea>
-        <button id="ob-mnemonic-done">I saved my phrase</button>
+        <h3 id="ob-secret-title">Your recovery phrase</h3>
+        <p id="ob-secret-desc">Write this down and store it securely. Anyone with this phrase can control your funds.</p>
+        <div id="ob-mnemonic-wrap">
+          <textarea id="ob-mnemonic" readonly></textarea>
+        </div>
+        <div class="mt-12">
+          <label>Device password (save this)</label>
+          <div class="row row-tight">
+            <input id="ob-password" class="flex-1" readonly>
+            <button id="ob-copy-password" class="btn-inline">Copy</button>
+          </div>
+          <div class="muted">You'll need this password to unlock the wallet on this device.</div>
+        </div>
+        <button id="ob-mnemonic-done">Continue</button>
       </div>
       <div id="ob-import-panel" style="display:none;">
         <h3>Restore existing wallet</h3>
         <p>Paste your mnemonic to restore an existing account.</p>
-        <label>Password</label>
-        <input id="ob-import-password" type="password" placeholder="Set a password for this device">
+        <div class="muted">A device password will be generated for you and shown once.</div>
         <label>Mnemonic</label>
         <input id="ob-import-mnemonic" placeholder="twelve or twenty-four words">
         <label>HRP</label>
@@ -180,7 +457,10 @@
     Pocket v0.1.2
   </footer>
   <script>
-    const { invoke } = window.__TAURI__.tauri;
+    const tauriCore = (window.__TAURI__ && (window.__TAURI__.core || window.__TAURI__.tauri || window.__TAURI__)) || null;
+    const invoke = tauriCore && typeof tauriCore.invoke === 'function'
+      ? tauriCore.invoke
+      : async () => { throw new Error('Tauri API unavailable'); };
     const status = document.getElementById('status');
     const dot = document.getElementById('dot');
     const banner = document.getElementById('error-banner');
@@ -198,6 +478,16 @@
     }
     function clearError() { showError(''); }
     function setOutput(obj) { output.textContent = typeof obj === 'string' ? obj : JSON.stringify(obj,null,2); }
+    window.addEventListener('error', (e) => {
+      const msg = e && e.message ? e.message : 'Unknown script error';
+      showError('UI error: ' + msg);
+      setStatus('UI error');
+    });
+    window.addEventListener('unhandledrejection', (e) => {
+      const msg = e && e.reason ? String(e.reason) : 'Unhandled promise rejection';
+      showError('UI error: ' + msg);
+      setStatus('UI error');
+    });
     function bumpLockTimer() {
       if (lockTimer) clearTimeout(lockTimer);
       lockTimer = setTimeout(() => setLocked(true), 5 * 60 * 1000);
@@ -360,7 +650,6 @@
       document.getElementById('att').value = localStorage.getItem('pocket_att') || '';
       currentRpc = document.getElementById('rpc').value || null;
     }
-    }
     document.getElementById('save-config').onclick = () => {
       const rpc = document.getElementById('rpc').value || null;
       const token = document.getElementById('token').value || null;
@@ -412,26 +701,79 @@
     // Onboarding
     function showOnboard() { document.getElementById('onboard').style.display = 'flex'; }
     function hideOnboard() { document.getElementById('onboard').style.display = 'none'; }
+    function setObMode(mode) {
+      const hero = document.getElementById('ob-hero');
+      const login = document.getElementById('ob-login-card');
+      const actions = document.getElementById('ob-actions');
+      const warning = document.getElementById('ob-warning-panel');
+      const create = document.getElementById('ob-create-panel');
+      const importPanel = document.getElementById('ob-import-panel');
+      const mnemonic = document.getElementById('ob-mnemonic-panel');
+      const isHero = mode === 'hero';
+      hero.style.display = isHero ? 'block' : 'none';
+      login.style.display = isHero ? 'flex' : 'none';
+      actions.style.display = isHero ? 'contents' : 'none';
+      warning.style.display = mode === 'warning' ? 'block' : 'none';
+      create.style.display = mode === 'create' ? 'block' : 'none';
+      importPanel.style.display = mode === 'import' ? 'block' : 'none';
+      mnemonic.style.display = mode === 'mnemonic' ? 'block' : 'none';
+    }
+    function randomPassword() {
+      if (window.crypto && window.crypto.getRandomValues) {
+        const bytes = new Uint8Array(24);
+        window.crypto.getRandomValues(bytes);
+        return Array.from(bytes).map(b => b.toString(16).padStart(2, '0')).join('');
+      }
+      let fallback = '';
+      for (let i = 0; i < 48; i++) fallback += Math.floor(Math.random() * 16).toString(16);
+      return fallback;
+    }
+    function showSecretPanel({ password, mnemonic }) {
+      setObMode('mnemonic');
+      const title = document.getElementById('ob-secret-title');
+      const desc = document.getElementById('ob-secret-desc');
+      const mnemonicWrap = document.getElementById('ob-mnemonic-wrap');
+      const mnemonicEl = document.getElementById('ob-mnemonic');
+      if (mnemonic) {
+        title.textContent = 'Your recovery phrase';
+        desc.textContent = 'Write this down and store it securely. Anyone with this phrase can control your funds.';
+        mnemonicWrap.style.display = 'block';
+        mnemonicEl.value = mnemonic;
+      } else {
+        title.textContent = 'Device password';
+        desc.textContent = 'Save this password. You will need it to unlock the wallet on this device.';
+        mnemonicWrap.style.display = 'none';
+      }
+      document.getElementById('ob-password').value = password;
+    }
     function showCreate() {
-      document.getElementById('ob-hero').style.display = 'none';
-      document.getElementById('ob-create-panel').style.display = 'block';
-      document.getElementById('ob-import-panel').style.display = 'none';
-      document.getElementById('ob-mnemonic-panel').style.display = 'none';
-      document.getElementById('ob-new-password').focus();
-      setStatus('Create a new wallet');
-      window.scrollTo({ top: 0, behavior: 'smooth' });
+      setObMode('warning');
+      setStatus('Before you continue');
+      document.getElementById('onboard').scrollTo({ top: 0, behavior: 'smooth' });
     }
     function showImport() {
-      document.getElementById('ob-hero').style.display = 'none';
-      document.getElementById('ob-create-panel').style.display = 'none';
-      document.getElementById('ob-import-panel').style.display = 'block';
-      document.getElementById('ob-mnemonic-panel').style.display = 'none';
-      document.getElementById('ob-import-password').focus();
+      setObMode('import');
+      document.getElementById('ob-import-mnemonic').focus();
       setStatus('Restore an existing wallet');
-      window.scrollTo({ top: 0, behavior: 'smooth' });
+      document.getElementById('onboard').scrollTo({ top: 0, behavior: 'smooth' });
     }
     document.getElementById('ob-btn-create').onclick = showCreate;
     document.getElementById('ob-btn-import').onclick = showImport;
+    document.getElementById('ob-login').onclick = () => {
+      hideOnboard();
+      setStatus('Login');
+    };
+    document.getElementById('ob-warning-back').onclick = () => {
+      setObMode('hero');
+      setStatus('Ready');
+      document.getElementById('onboard').scrollTo({ top: 0, behavior: 'smooth' });
+    };
+    document.getElementById('ob-warning-proceed').onclick = () => {
+      setObMode('create');
+      document.getElementById('ob-new-hrp').focus();
+      setStatus('Create a new wallet');
+      document.getElementById('onboard').scrollTo({ top: 0, behavior: 'smooth' });
+    };
     let lastCreatedPassword = '';
     function onboardDone(password) {
       document.getElementById('password').value = password;
@@ -440,17 +782,14 @@
       setLocked(false);
     }
     document.getElementById('ob-create').onclick = async () => {
-      const pw = document.getElementById('ob-new-password').value;
+      const pw = randomPassword();
       const hrp = document.getElementById('ob-new-hrp').value || 'tpc';
-      if (!pw) { showError('Set a password'); return; }
       try {
         setStatus('Generating wallet...');
         const res = await invoke('cmd_init', { password: pw, hrp });
         const info = JSON.parse(res);
-        document.getElementById('ob-mnemonic').value = info.mnemonic || '(mnemonic unavailable)';
         lastCreatedPassword = pw;
-        document.getElementById('ob-create-panel').style.display = 'none';
-        document.getElementById('ob-mnemonic-panel').style.display = 'block';
+        showSecretPanel({ password: pw, mnemonic: info.mnemonic || '(mnemonic unavailable)' });
         setStatus('Wallet created');
       } catch (e) { showError(String(e)); }
     };
@@ -459,14 +798,31 @@
       onboardDone(lastCreatedPassword);
     };
     document.getElementById('ob-import').onclick = async () => {
-      const pw = document.getElementById('ob-import-password').value;
+      const pw = randomPassword();
       const m = document.getElementById('ob-import-mnemonic').value;
       const hrp = document.getElementById('ob-import-hrp').value || 'tpc';
-      if (!pw || !m) { showError('Enter password and mnemonic'); return; }
+      if (!m) { showError('Enter mnemonic'); return; }
       try {
         await invoke('cmd_import', { password: pw, mnemonic: m, hrp });
-        onboardDone(pw);
+        lastCreatedPassword = pw;
+        showSecretPanel({ password: pw, mnemonic: null });
       } catch (e) { showError(String(e)); }
+    };
+    document.getElementById('ob-copy-password').onclick = async () => {
+      const val = document.getElementById('ob-password').value;
+      if (!val) return;
+      try {
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+          await navigator.clipboard.writeText(val);
+        } else {
+          const input = document.getElementById('ob-password');
+          input.select();
+          document.execCommand('copy');
+        }
+        setStatus('Password copied');
+      } catch (e) {
+        showError('Copy failed: ' + String(e));
+      }
     };
 
     // bootstrap
@@ -476,6 +832,7 @@
     showOnboard();
     // default to hero; will swap when buttons clicked
     setObMode('hero');
+    setStatus('UI ready');
   </script>
 </body>
 </html>

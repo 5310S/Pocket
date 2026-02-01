@@ -12,8 +12,10 @@
       {
         "label": "main",
         "title": "Pocket Wallet v0.1.2",
-        "width": 480,
-        "height": 640,
+        "width": 900,
+        "height": 720,
+        "minWidth": 720,
+        "minHeight": 640,
         "resizable": true
       }
     ],

@@ -12,4 +12,4 @@ serde_json = "1"
 pocket_lib = { path = "../../", package = "pocket" }
 
 [build-dependencies]
-tauri-build = { version = "2.5.1" }
+tauri-build = { version = "2.5.1", features = [] }
