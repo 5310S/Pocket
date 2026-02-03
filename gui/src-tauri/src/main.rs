@@ -1,9 +1,9 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 use pocket_lib::{
-    balance, chain_head, difficulty, export_mnemonic, import_mnemonic, init_keystore, load_config,
-    load_keystore, load_profile, save_config, save_profile, submit_tx, build_and_sign_transfer,
-    BuildKind, Config, PocketError, Profile, TxBuildRequest,
+    balance, chain_head, change_password, difficulty, export_mnemonic, import_mnemonic, init_keystore,
+    load_config, load_keystore, load_profile, save_config, save_profile, submit_tx,
+    build_and_sign_transfer, BuildKind, Config, PocketError, Profile, TxBuildRequest,
 };
 
 fn map_err(e: PocketError) -> String { e.to_string() }
@@ -44,8 +44,27 @@ fn cmd_import(password: String, mnemonic: String, hrp: String) -> Result<String,
 }
 
 #[tauri::command]
-fn cmd_set_config(rpc: Option<String>, token: Option<String>) -> Result<String, String> {
-    save_config(&Config { rpc_base: rpc, token }).map(|_| "{\"status\":\"ok\"}".into()).map_err(map_err)
+fn cmd_change_password(old_password: String, new_password: String) -> Result<String, String> {
+    change_password(&old_password, &new_password)
+        .map(|_| "{\"status\":\"ok\"}".into())
+        .map_err(map_err)
+}
+
+#[tauri::command]
+fn cmd_set_config(
+    rpc: Option<String>,
+    token: Option<String>,
+    p2p_bootstrap: Option<Vec<String>>,
+) -> Result<String, String> {
+    let mut cfg = load_config().unwrap_or_default();
+    cfg.rpc_base = rpc;
+    cfg.token = token;
+    if let Some(list) = p2p_bootstrap {
+        cfg.p2p_bootstrap = list;
+    }
+    save_config(&cfg)
+        .map(|_| "{\"status\":\"ok\"}".into())
+        .map_err(map_err)
 }
 
 #[tauri::command]
@@ -135,6 +154,7 @@ fn main() {
             cmd_difficulty,
             cmd_export,
             cmd_import,
+            cmd_change_password,
             cmd_set_config,
             cmd_show_config,
             cmd_set_profile,

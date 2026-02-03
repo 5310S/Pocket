@@ -138,8 +138,11 @@
     .row { display:flex; gap:10px; align-items:center; flex-wrap:wrap; }
     .row-between { justify-content:space-between; gap:12px; margin-top:18px; }
     .row-tight { gap:8px; align-items:center; }
+    .mt-8 { margin-top:8px; }
     .mt-12 { margin-top:12px; }
     .flex-1 { flex:1; }
+    .option-row { gap:12px; }
+    .btn-option { flex:1; margin-top:0; }
 
     .status { font-size:13px; color:var(--muted); display:flex; align-items:center; gap:8px; }
     .dot { width:10px; height:10px; border-radius:50%; background:var(--muted); box-shadow:0 0 0 2px rgba(0,0,0,0.25); }
@@ -299,6 +302,7 @@
         <p>A place to put your Peace</p>
       </div>
       <div id="ob-right">
+        <div id="ob-error" class="banner" style="display:none;"></div>
         <div id="ob-actions">
           <div id="ob-create-card" class="action-card">
             <h4>Create a New Wallet</h4>
@@ -328,30 +332,41 @@
             <button id="ob-warning-proceed" class="btn-danger btn-inline">Proceed!</button>
           </div>
         </div>
-        <div id="ob-create-panel" style="display:none;">
-          <h3>Create a new wallet</h3>
-          <p>Generates a fresh mnemonic and a device password for this wallet.</p>
-          <div class="muted">Your device password is generated automatically and shown once.</div>
-          <label>HRP</label>
-          <input id="ob-new-hrp" value="tpc">
-          <button id="ob-create">Generate Wallet</button>
+      <div id="ob-create-panel" style="display:none;">
+        <h3>Create a new wallet</h3>
+        <p>Generates a fresh mnemonic and a device password for this wallet.</p>
+        <div class="muted">Your device password is generated automatically and shown once.</div>
+        <label>Choose network</label>
+        <div class="row option-row">
+          <button id="ob-create-testnet" class="btn-option">Generate on Testnet</button>
+          <button id="ob-create-mainnet" class="btn-option">Generate on Mainnet</button>
         </div>
+      </div>
         <div id="ob-mnemonic-panel" style="display:none;">
           <h3 id="ob-secret-title">Your recovery phrase</h3>
           <p id="ob-secret-desc">Write this down and store it securely. Anyone with this phrase can control your funds.</p>
           <div id="ob-mnemonic-wrap">
             <textarea id="ob-mnemonic" readonly></textarea>
           </div>
-          <div class="mt-12">
-            <label>Device password (save this)</label>
-            <div class="row row-tight">
-              <input id="ob-password" class="flex-1" readonly>
-              <button id="ob-copy-password" class="btn-inline">Copy</button>
-            </div>
-            <div class="muted">You'll need this password to unlock the wallet on this device.</div>
+        <div class="mt-12">
+          <label>Device password (save this)</label>
+          <div class="row row-tight">
+            <input id="ob-password" class="flex-1" readonly>
+            <button id="ob-copy-password" class="btn-inline">Copy</button>
           </div>
-          <button id="ob-mnemonic-done">Continue</button>
+          <div class="muted">You'll need this password to unlock the wallet on this device.</div>
         </div>
+        <div class="mt-12">
+          <label>Use your own password (optional)</label>
+          <input id="ob-password-custom" type="password" placeholder="Enter a new device password">
+          <input id="ob-password-custom-confirm" class="mt-8" type="password" placeholder="Confirm password">
+          <div class="row row-tight mt-8">
+            <button id="ob-password-set" class="btn-ghost btn-inline">Use my password</button>
+          </div>
+          <div class="muted">This replaces the generated device password.</div>
+        </div>
+        <button id="ob-mnemonic-done">Continue</button>
+      </div>
         <div id="ob-import-panel" style="display:none;">
           <h3>Restore existing wallet</h3>
           <p>Paste your mnemonic to restore an existing account.</p>
@@ -459,6 +474,9 @@
         <input id="token" placeholder="Bearer token (optional)" style="flex:1; min-width:200px;">
       </div>
       <div class="row" style="flex-wrap:wrap; gap:8px; margin-top:8px;">
+        <input id="p2p-bootstrap" placeholder="P2P bootstrap (optional, auto if blank)" style="flex:1; min-width:240px;">
+      </div>
+      <div class="row" style="flex-wrap:wrap; gap:8px; margin-top:8px;">
         <input id="payout" placeholder="Payout address (pc/tpc)" style="flex:1; min-width:240px;">
         <input id="att" placeholder="Attestation token (optional)" style="flex:1; min-width:200px;">
       </div>
@@ -478,10 +496,19 @@
     Pocket v0.1.2
   </footer>
   <script>
-    const tauriCore = (window.__TAURI__ && (window.__TAURI__.core || window.__TAURI__.tauri || window.__TAURI__)) || null;
-    const invoke = tauriCore && typeof tauriCore.invoke === 'function'
-      ? tauriCore.invoke
-      : async () => { throw new Error('Tauri API unavailable'); };
+    function getInvoke() {
+      const t = window.__TAURI__;
+      if (!t) return null;
+      if (t.core && typeof t.core.invoke === 'function') return t.core.invoke;
+      if (t.tauri && typeof t.tauri.invoke === 'function') return t.tauri.invoke;
+      if (typeof t.invoke === 'function') return t.invoke;
+      return null;
+    }
+    async function invoke(cmd, args) {
+      const fn = getInvoke();
+      if (!fn) throw new Error('Tauri API unavailable');
+      return fn(cmd, args);
+    }
     const status = document.getElementById('status');
     const dot = document.getElementById('dot');
     const banner = document.getElementById('error-banner');
@@ -495,6 +522,11 @@
     function showError(msg) {
       banner.style.display = msg ? 'block' : 'none';
       banner.textContent = msg || '';
+      const obError = document.getElementById('ob-error');
+      if (obError) {
+        obError.style.display = msg ? 'block' : 'none';
+        obError.textContent = msg || '';
+      }
       if (msg) setDot(false);
     }
     function clearError() { showError(''); }
@@ -661,12 +693,14 @@
     function persistSettings() {
       localStorage.setItem('pocket_rpc', document.getElementById('rpc').value || '');
       localStorage.setItem('pocket_token', document.getElementById('token').value || '');
+      localStorage.setItem('pocket_p2p', document.getElementById('p2p-bootstrap').value || '');
       localStorage.setItem('pocket_payout', document.getElementById('payout').value || '');
       localStorage.setItem('pocket_att', document.getElementById('att').value || '');
     }
     function loadSettings() {
       document.getElementById('rpc').value = localStorage.getItem('pocket_rpc') || '';
       document.getElementById('token').value = localStorage.getItem('pocket_token') || '';
+      document.getElementById('p2p-bootstrap').value = localStorage.getItem('pocket_p2p') || '';
       document.getElementById('payout').value = localStorage.getItem('pocket_payout') || '';
       document.getElementById('att').value = localStorage.getItem('pocket_att') || '';
       currentRpc = document.getElementById('rpc').value || null;
@@ -674,9 +708,11 @@
     document.getElementById('save-config').onclick = () => {
       const rpc = document.getElementById('rpc').value || null;
       const token = document.getElementById('token').value || null;
+      const p2pRaw = document.getElementById('p2p-bootstrap').value || '';
+      const p2p_bootstrap = p2pRaw.split(',').map(s => s.trim()).filter(Boolean);
       currentRpc = rpc;
       persistSettings();
-      call('cmd_set_config', { rpc, token });
+      call('cmd_set_config', { rpc, token, p2p_bootstrap });
     };
     document.getElementById('show-config').onclick = () => {
       call('cmd_show_config', {}).then(() => setDot(true)).catch(() => setDot(false));
@@ -697,6 +733,9 @@
         const obj = JSON.parse(cfg);
         if (obj.rpc_base) { document.getElementById('rpc').value = obj.rpc_base; currentRpc = obj.rpc_base; }
         if (obj.token) { document.getElementById('token').value = obj.token; }
+        if (obj.p2p_bootstrap && Array.isArray(obj.p2p_bootstrap)) {
+          document.getElementById('p2p-bootstrap').value = obj.p2p_bootstrap.join(', ');
+        }
       } catch (e) { /* ignore */ }
       try {
         const prof = await invoke('cmd_get_payout', {});
@@ -776,6 +815,14 @@
       }
       document.getElementById('ob-password').value = password;
     }
+    function setCreateButtonsLoading(loading) {
+      const btns = document.querySelectorAll('#ob-create-panel .btn-option');
+      btns.forEach(btn => {
+        if (!btn.dataset.label) btn.dataset.label = btn.textContent;
+        btn.disabled = loading;
+        btn.textContent = loading ? 'Generating...' : btn.dataset.label;
+      });
+    }
     function showCreate() {
       setObMode('warning');
       setStatus('Before you continue');
@@ -800,7 +847,7 @@
     };
     document.getElementById('ob-warning-proceed').onclick = () => {
       setObMode('create');
-      document.getElementById('ob-new-hrp').focus();
+      document.getElementById('ob-create-testnet').focus();
       setStatus('Create a new wallet');
       document.getElementById('onboard').scrollTo({ top: 0, behavior: 'smooth' });
     };
@@ -811,10 +858,11 @@
       clearError();
       setLocked(false);
     }
-    document.getElementById('ob-create').onclick = async () => {
+    async function createWalletWithHrp(hrp) {
       const pw = randomPassword();
-      const hrp = document.getElementById('ob-new-hrp').value || 'tpc';
       try {
+        clearError();
+        setCreateButtonsLoading(true);
         setStatus('Generating wallet...');
         const res = await invoke('cmd_init', { password: pw, hrp });
         const info = JSON.parse(res);
@@ -822,7 +870,10 @@
         showSecretPanel({ password: pw, mnemonic: info.mnemonic || '(mnemonic unavailable)' });
         setStatus('Wallet created');
       } catch (e) { showError(String(e)); }
-    };
+      finally { setCreateButtonsLoading(false); }
+    }
+    document.getElementById('ob-create-testnet').onclick = () => createWalletWithHrp('tpc');
+    document.getElementById('ob-create-mainnet').onclick = () => createWalletWithHrp('pc');
     document.getElementById('ob-mnemonic-done').onclick = () => {
       if (!lastCreatedPassword) { showError('No wallet generated yet'); return; }
       onboardDone(lastCreatedPassword);
@@ -853,6 +904,23 @@
       } catch (e) {
         showError('Copy failed: ' + String(e));
       }
+    };
+    document.getElementById('ob-password-set').onclick = async () => {
+      const newPw = document.getElementById('ob-password-custom').value;
+      const confirm = document.getElementById('ob-password-custom-confirm').value;
+      if (!lastCreatedPassword) { showError('No wallet generated yet'); return; }
+      if (!newPw) { showError('Enter a new password'); return; }
+      if (newPw !== confirm) { showError('Passwords do not match'); return; }
+      try {
+        clearError();
+        setStatus('Updating password...');
+        await invoke('cmd_change_password', { old_password: lastCreatedPassword, new_password: newPw });
+        lastCreatedPassword = newPw;
+        document.getElementById('ob-password').value = newPw;
+        document.getElementById('ob-password-custom').value = '';
+        document.getElementById('ob-password-custom-confirm').value = '';
+        setStatus('Password updated');
+      } catch (e) { showError(String(e)); }
     };
 
     // bootstrap

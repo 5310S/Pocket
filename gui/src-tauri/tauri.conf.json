@@ -8,6 +8,7 @@
     "beforeDevCommand": ""
   },
   "app": {
+    "withGlobalTauri": true,
     "windows": [
       {
         "label": "main",

@@ -19,6 +19,8 @@ use sha2::{Digest, Sha256};
 use strum::{Display, EnumString};
 use thiserror::Error;
 
+mod p2p;
+
 #[derive(Debug, Error)]
 pub enum PocketError {
     #[error("invalid hrp: {0}")]
@@ -31,6 +33,8 @@ pub enum PocketError {
     Crypto(String),
     #[error("rpc error: {0}")]
     Rpc(String),
+    #[error("proof error: {0}")]
+    Proof(String),
 }
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -54,11 +58,14 @@ const CONFIG_PATH: &str = "~/.pocket/config.json";
 const PROFILE_PATH: &str = "~/.pocket/profile.json";
 const ENV_TLS_INSECURE: &str = "POCKET_TLS_INSECURE";
 const ENV_PENDING_POOL: &str = "PENDING_POOL_PATH";
+const DEFAULT_P2P_BOOTSTRAP: &[&str] = &["93.127.216.241:50051"];
 
 #[derive(Serialize, Deserialize, Clone, Default)]
 pub struct Config {
     pub rpc_base: Option<String>,
     pub token: Option<String>,
+    #[serde(default)]
+    pub p2p_bootstrap: Vec<String>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Default)]
@@ -72,6 +79,38 @@ pub struct BalanceInfo {
     pub addr: String,
     pub balance: u64,
     pub nonce: u64,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct StakeLock {
+    pub amount: u128,
+    pub start_height: u64,
+    pub unlock_height: u64,
+    pub payout: String,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, Default)]
+pub struct AccountState {
+    pub balance: u128,
+    pub nonce: u64,
+    pub stakes: Vec<StakeLock>,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct AccountProofItem {
+    pub hash: Vec<u8>,
+    pub position: String,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct AccountProofResponse {
+    pub addr: String,
+    pub account: AccountState,
+    pub proof: Vec<AccountProofItem>,
+    pub root: String,
+    pub index: usize,
+    pub chain_id: String,
+    pub height: u64,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -133,6 +172,66 @@ fn bech32_address(hrp: &str, vk: &VerifyingKey) -> Result<String, PocketError> {
     }
     let data = vk.as_bytes().to_base32();
     encode(hrp, data, Variant::Bech32).map_err(|e| PocketError::Mnemonic(e.to_string()))
+}
+
+fn hash_bytes(data: &[u8]) -> [u8; 32] {
+    let digest = Sha256::digest(data);
+    let mut out = [0u8; 32];
+    out.copy_from_slice(&digest[..32]);
+    out
+}
+
+fn state_leaf_hash(key: &str, value: &[u8]) -> [u8; 32] {
+    let mut buf = Vec::with_capacity(key.len() + 1 + value.len());
+    buf.extend_from_slice(key.as_bytes());
+    buf.push(0);
+    buf.extend_from_slice(value);
+    hash_bytes(&buf)
+}
+
+fn account_leaf_hash(addr: &str, account: &AccountState) -> Result<[u8; 32], PocketError> {
+    #[derive(Serialize)]
+    struct AccountLeaf<'a> {
+        addr: &'a str,
+        account: &'a AccountState,
+    }
+    let leaf = AccountLeaf { addr, account };
+    let bytes =
+        serde_json::to_vec(&leaf).map_err(|e| PocketError::Proof(e.to_string()))?;
+    Ok(state_leaf_hash(&format!("account:{}", addr), &bytes))
+}
+
+fn verify_account_proof(proof: &AccountProofResponse) -> bool {
+    let mut hash = match account_leaf_hash(&proof.addr, &proof.account) {
+        Ok(h) => h,
+        Err(_) => return false,
+    };
+    for item in &proof.proof {
+        if item.hash.len() != 32 {
+            return false;
+        }
+        let mut sibling = [0u8; 32];
+        sibling.copy_from_slice(&item.hash[..32]);
+        let mut buf = Vec::with_capacity(64);
+        if item.position == "left" {
+            buf.extend_from_slice(&sibling);
+            buf.extend_from_slice(&hash);
+        } else if item.position == "right" {
+            buf.extend_from_slice(&hash);
+            buf.extend_from_slice(&sibling);
+        } else {
+            return false;
+        }
+        hash = hash_bytes(&buf);
+    }
+    let root_bytes = match hex::decode(&proof.root) {
+        Ok(b) => b,
+        Err(_) => return false,
+    };
+    if root_bytes.len() != 32 {
+        return false;
+    }
+    hash.as_slice() == root_bytes.as_slice()
 }
 
 pub fn gen_key(words: usize, hrp: &str) -> Result<KeyInfo, PocketError> {
@@ -199,6 +298,27 @@ pub fn load_config() -> Result<Config, PocketError> {
         Ok(txt) => serde_json::from_str(&txt).map_err(|e| PocketError::Io(e.to_string())),
         Err(_) => Ok(Config::default()),
     }
+}
+
+fn p2p_bootstrap(cfg: &Config) -> Vec<String> {
+    if let Ok(raw) = std::env::var("POCKET_P2P_BOOTSTRAP") {
+        let trimmed = raw.trim();
+        if trimmed.eq_ignore_ascii_case("none") || trimmed.eq_ignore_ascii_case("off") {
+            return Vec::new();
+        }
+        let list: Vec<String> = trimmed
+            .split(',')
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+            .collect();
+        if !list.is_empty() {
+            return list;
+        }
+    }
+    if !cfg.p2p_bootstrap.is_empty() {
+        return cfg.p2p_bootstrap.clone();
+    }
+    DEFAULT_P2P_BOOTSTRAP.iter().map(|s| s.to_string()).collect()
 }
 
 pub fn save_profile(profile: &Profile) -> Result<(), PocketError> {
@@ -305,21 +425,24 @@ pub fn import_mnemonic(password: &str, mnemonic: &str, hrp: &str) -> Result<KeyI
     addr_from_mnemonic(mnemonic, hrp)
 }
 
+pub fn change_password(old_password: &str, new_password: &str) -> Result<(), PocketError> {
+    let path = keystore_path();
+    let data = fs::read_to_string(&path).map_err(|e| PocketError::Io(e.to_string()))?;
+    let ks: Keystore = serde_json::from_str(&data).map_err(|e| PocketError::Io(e.to_string()))?;
+    let mnemonic = decrypt_mnemonic(&ks, old_password)?;
+    let new_ks = encrypt_mnemonic(&mnemonic, new_password, &ks.hrp)?;
+    let data = serde_json::to_vec_pretty(&new_ks).map_err(|e| PocketError::Io(e.to_string()))?;
+    fs::write(&path, data).map_err(|e| PocketError::Io(e.to_string()))
+}
+
 pub fn balance(
     password: &str,
     rpc: Option<String>,
     token: Option<String>,
 ) -> Result<String, PocketError> {
     let info = load_keystore(password)?;
-    let cfg = load_config().unwrap_or_default();
-    let rpc_base = rpc
-        .or(cfg.rpc_base.clone())
-        .unwrap_or_else(|| "https://127.0.0.1:8645".to_string());
-    let client = rpc_client()?;
-    let req = client
-        .post(format!("{}/getBalance", rpc_base.trim_end_matches('/')))
-        .json(&serde_json::json!({"addr": info.address}));
-    rpc_send(req, token.or(cfg.token))
+    let verified = fetch_balance(&info.address, rpc, token)?;
+    serde_json::to_string(&verified).map_err(|e| PocketError::Rpc(e.to_string()))
 }
 
 pub fn fetch_balance(
@@ -328,25 +451,126 @@ pub fn fetch_balance(
     token: Option<String>,
 ) -> Result<BalanceInfo, PocketError> {
     let cfg = load_config().unwrap_or_default();
+    let peers = p2p_bootstrap(&cfg);
+    if !peers.is_empty() {
+        match p2p::fetch_balance_p2p(addr, &peers) {
+            Ok(info) => return Ok(info),
+            Err(e) => {
+                if rpc.is_none() && cfg.rpc_base.is_none() {
+                    return Err(e);
+                }
+            }
+        }
+    }
+    fetch_balance_rpc(addr, rpc, token, &cfg)
+}
+
+fn fetch_balance_rpc(
+    addr: &str,
+    rpc: Option<String>,
+    token: Option<String>,
+    cfg: &Config,
+) -> Result<BalanceInfo, PocketError> {
     let rpc_base = rpc
         .or(cfg.rpc_base.clone())
         .unwrap_or_else(|| "https://127.0.0.1:8645".to_string());
     let client = rpc_client()?;
-    let mut req = client
-        .post(format!("{}/getBalance", rpc_base.trim_end_matches('/')))
-        .json(&serde_json::json!({"addr": addr}));
+    let mut head_req = client.get(format!(
+        "{}/weave/chain/head",
+        rpc_base.trim_end_matches('/')
+    ));
     if let Some(t) = token
-        .or(cfg.token)
+        .clone()
+        .or(cfg.token.clone())
         .or_else(|| std::env::var("LANTERN_HTTP_TOKEN").ok())
     {
-        req = req.bearer_auth(t);
+        head_req = head_req.bearer_auth(t);
     }
-    let resp = req.send().map_err(|e| PocketError::Rpc(e.to_string()))?;
-    if !resp.status().is_success() {
-        return Err(PocketError::Rpc(format!("http {}", resp.status())));
+    let head_resp = head_req
+        .send()
+        .map_err(|e| PocketError::Rpc(e.to_string()))?;
+    if !head_resp.status().is_success() {
+        return Err(PocketError::Rpc(format!("http {}", head_resp.status())));
     }
-    let txt = resp.text().map_err(|e| PocketError::Rpc(e.to_string()))?;
-    serde_json::from_str(&txt).map_err(|e| PocketError::Rpc(e.to_string()))
+    let head_txt = head_resp
+        .text()
+        .map_err(|e| PocketError::Rpc(e.to_string()))?;
+    let head_json: serde_json::Value =
+        serde_json::from_str(&head_txt).map_err(|e| PocketError::Rpc(e.to_string()))?;
+    let head_hash = head_json
+        .get("head_hash")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| PocketError::Rpc("missing head hash".into()))?;
+    let mut block_req = client.get(format!(
+        "{}/weave/chain/block?hash={}",
+        rpc_base.trim_end_matches('/'),
+        head_hash
+    ));
+    if let Some(t) = token
+        .clone()
+        .or(cfg.token.clone())
+        .or_else(|| std::env::var("LANTERN_HTTP_TOKEN").ok())
+    {
+        block_req = block_req.bearer_auth(t);
+    }
+    let block_resp = block_req
+        .send()
+        .map_err(|e| PocketError::Rpc(e.to_string()))?;
+    if !block_resp.status().is_success() {
+        return Err(PocketError::Rpc(format!("http {}", block_resp.status())));
+    }
+    let block_txt = block_resp
+        .text()
+        .map_err(|e| PocketError::Rpc(e.to_string()))?;
+    let block_json: serde_json::Value =
+        serde_json::from_str(&block_txt).map_err(|e| PocketError::Rpc(e.to_string()))?;
+    let state_root_hex = block_json
+        .get("header")
+        .and_then(|h| h.get("state_root"))
+        .and_then(|v| v.as_array())
+        .map(|arr| {
+            let bytes: Vec<u8> = arr
+                .iter()
+                .filter_map(|n| n.as_u64().map(|u| u as u8))
+                .collect();
+            hex::encode(bytes)
+        })
+        .ok_or_else(|| PocketError::Rpc("missing state_root".into()))?;
+
+    let mut proof_req = client.get(format!(
+        "{}/weave/chain/account_proof?addr={}",
+        rpc_base.trim_end_matches('/'),
+        addr
+    ));
+    if let Some(t) = token
+        .clone()
+        .or(cfg.token.clone())
+        .or_else(|| std::env::var("LANTERN_HTTP_TOKEN").ok())
+    {
+        proof_req = proof_req.bearer_auth(t);
+    }
+    let proof_resp = proof_req
+        .send()
+        .map_err(|e| PocketError::Rpc(e.to_string()))?;
+    if !proof_resp.status().is_success() {
+        return Err(PocketError::Rpc(format!("http {}", proof_resp.status())));
+    }
+    let proof_txt = proof_resp
+        .text()
+        .map_err(|e| PocketError::Rpc(e.to_string()))?;
+    let proof: AccountProofResponse =
+        serde_json::from_str(&proof_txt).map_err(|e| PocketError::Rpc(e.to_string()))?;
+    if proof.root != state_root_hex {
+        return Err(PocketError::Proof("state_root mismatch".into()));
+    }
+    if !verify_account_proof(&proof) {
+        return Err(PocketError::Proof("invalid account proof".into()));
+    }
+    Ok(BalanceInfo {
+        addr: proof.addr,
+        balance: proof.account.balance as u64,
+        nonce: proof.account.nonce,
+    })
 }
 
 pub fn chain_head(rpc: Option<String>, token: Option<String>) -> Result<String, PocketError> {
