@@ -20,6 +20,8 @@ const FEATURE_CHAIN_ID_PREFIX: &str = "chain-id:";
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 enum NodeRole {
+    Full,
+    Validator,
     Light,
 }
 
@@ -126,6 +128,7 @@ enum P2PMessage {
         chain_id: String,
     },
     Disconnect { reason: String },
+    Ignored,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -324,13 +327,12 @@ fn perform_handshake(stream: &mut TcpStream, chain_id: &str) -> Result<HelloPayl
 }
 
 fn request_header(stream: &mut TcpStream, height: u64) -> Result<BlockHeader, PocketError> {
-    write_msg(
-        stream,
-        &P2PMessage::GetHeaders {
-            from: height,
-            to: Some(height),
-        },
-    )?;
+    let (from, to) = if height == 0 {
+        (0, Some(512))
+    } else {
+        (height, Some(height))
+    };
+    write_msg(stream, &P2PMessage::GetHeaders { from, to })?;
     let start = Instant::now();
     let mut scratch = Vec::new();
     loop {
@@ -340,6 +342,16 @@ fn request_header(stream: &mut TcpStream, height: u64) -> Result<BlockHeader, Po
         let msg = read_msg(stream, &mut scratch)?;
         match msg {
             Some(P2PMessage::Headers(list)) => {
+                if list.is_empty() {
+                    return Err(PocketError::Rpc("header not found".into()));
+                }
+                if height == 0 {
+                    let best = list
+                        .into_iter()
+                        .max_by_key(|b| b.header.height)
+                        .ok_or_else(|| PocketError::Rpc("header not found".into()))?;
+                    return Ok(best.header);
+                }
                 let header = list
                     .into_iter()
                     .find(|b| b.header.height == height)
@@ -387,8 +399,24 @@ fn read_msg(stream: &mut TcpStream, scratch: &mut Vec<u8>) -> Result<Option<P2PM
         Some(f) => f,
         None => return Ok(None),
     };
-    let msg: P2PMessage =
+    let value: serde_json::Value =
         serde_json::from_slice(&frame).map_err(|e| PocketError::Rpc(e.to_string()))?;
+    let key = value
+        .as_object()
+        .and_then(|obj| obj.keys().next().map(|k| k.as_str().to_string()))
+        .unwrap_or_default();
+    let msg = match key.as_str() {
+        "Hello"
+        | "Ping"
+        | "Pong"
+        | "Headers"
+        | "GetHeaders"
+        | "GetAccountProof"
+        | "AccountProof"
+        | "Disconnect" => serde_json::from_value(value)
+            .map_err(|e| PocketError::Rpc(e.to_string()))?,
+        _ => P2PMessage::Ignored,
+    };
     Ok(Some(msg))
 }
 
