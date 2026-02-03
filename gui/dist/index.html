@@ -34,6 +34,7 @@
       background:radial-gradient(900px 700px at 15% -15%, #1b2748 0%, #0f1830 45%, var(--bg-0) 100%);
       letter-spacing:0.2px;
     }
+    body.onboard-open { overflow:hidden; }
 
     header {
       padding:20px 26px;
@@ -99,6 +100,8 @@
       background:linear-gradient(180deg,var(--accent),var(--accent-2));
       color:#08101f;
       font-weight:700;
+      font-size:15px;
+      line-height:1.1;
       cursor:pointer;
       box-shadow:0 10px 20px rgba(58,161,255,0.25), inset 0 1px 0 rgba(255,255,255,0.35);
       transition:transform 0.12s ease, box-shadow 0.2s ease, filter 0.2s ease;
@@ -156,11 +159,11 @@
     #onboard {
       position:fixed;
       inset:0;
-      padding:28px 24px;
+      padding:0;
       background:rgba(7,11,22,0.92);
       backdrop-filter: blur(14px);
       display:flex;
-      align-items:flex-start;
+      align-items:stretch;
       justify-content:center;
       z-index:999;
       overflow:auto;
@@ -169,28 +172,35 @@
     #onboard .panel {
       background:linear-gradient(160deg,#0e162c,#101c35 70%);
       border:1px solid var(--line);
-      border-radius:18px;
-      padding:28px 30px;
-      width:min(96vw, 1040px);
-      min-height:440px;
-      margin-top:min(8vh, 72px);
+      border-radius:0;
+      padding:32px 36px;
+      width:100%;
+      min-height:100%;
+      margin-top:0;
       box-shadow:0 28px 70px rgba(0,0,0,0.55);
       display:grid;
       grid-template-columns:repeat(2, minmax(0, 1fr));
-      grid-auto-rows:minmax(0, 1fr);
-      grid-template-areas:
-        "hero create"
-        "login restore";
-      gap:20px 24px;
+      gap:24px;
       animation:panelIn 0.5s ease-out;
       align-items:stretch;
     }
+    #onboard .panel.ob-single {
+      grid-template-columns:1fr;
+      justify-items:center;
+    }
+    #onboard .panel.ob-single #ob-right {
+      width:100%;
+      max-width:720px;
+    }
+    #onboard .panel.ob-single #ob-warning-panel {
+      width:100%;
+    }
 
-    #onboard h2 { margin:0 0 8px; font-size:40px; letter-spacing:0.8px; }
+    #onboard h1 { margin:0 0 8px; font-size:40px; letter-spacing:0.8px; }
     #onboard p { color:var(--muted); margin:0 0 12px; font-size:16px; }
     #onboard button { width:100%; margin-top:12px; }
 
-    .tile, .action-card, #ob-warning-panel, #ob-create-panel, #ob-import-panel, #ob-mnemonic-panel {
+    .action-card, #ob-warning-panel, #ob-create-panel, #ob-import-panel, #ob-mnemonic-panel {
       background:linear-gradient(160deg, rgba(15,23,40,0.95), rgba(16,28,50,0.9));
       border:1px solid var(--line);
       border-radius:14px;
@@ -198,9 +208,13 @@
       box-shadow:inset 0 1px 0 rgba(255,255,255,0.04);
       text-align: center;
     }
+    .action-card {
+      height:180px;
+      display:flex;
+      flex-direction:column;
+    }
 
     #ob-hero {
-      grid-area:hero;
       text-align:center;
       display:flex;
       flex-direction:column;
@@ -208,26 +222,33 @@
       align-items:center;
       width:100%;
       height:100%;
+      padding:24px;
     }
 
-    #ob-login-card {
-      grid-area:login;
+    #ob-right {
       display:flex;
-      align-items:center;
+      flex-direction:column;
       justify-content:center;
-      text-align: center;
-      
+      align-items:center;
+      gap:16px;
+      width:100%;
     }
 
-    #ob-login-card button { width:100%; max-width:260px; }
+    #ob-right > * { width:100%; max-width:460px; }
 
-    #ob-actions { display:contents; }
-    #ob-create-card { grid-area:create; }
-    #ob-import-card { grid-area:restore; }
+    #ob-actions {
+      display:flex;
+      flex-direction:column;
+      gap:12px;
+      width:100%;
+    }
+
+    #ob-login-card button { width:100%; max-width:none; }
+    #ob-login-card h4 { font-size:20px; }
 
     .action-card h4 { margin:0 0 6px; font-size:16px; }
     .action-card p { margin:0 0 12px; font-size:13px; color:var(--muted); }
-    .action-card button { margin-top:0; }
+    .action-card button { margin-top:auto; }
 
     .ob-list { margin:0 0 14px 18px; color:var(--muted); font-size:13px; }
 
@@ -245,16 +266,13 @@
     @media (max-width: 860px) {
       header { padding:18px 20px; }
       main { padding:0 18px; }
-      #onboard { padding:20px 16px; }
+      #onboard { padding:0; }
       #onboard .panel {
         grid-template-columns:1fr;
-        grid-template-areas:
-          "hero"
-          "create"
-          "restore"
-          "login";
-        padding:22px;
+        padding:20px;
       }
+      #ob-right { justify-content:flex-start; }
+      .action-card { height:auto; }
     }
 
     @media (prefers-reduced-motion: reduce) {
@@ -276,71 +294,74 @@
 <body>
   <div id="onboard">
     <div class="panel">
-      <div id="ob-hero" class="tile">
-        <h2>Pocket</h2>
+      <div id="ob-hero">
+        <h1>Pocket</h1>
         <p>A place to put your Peace</p>
       </div>
-      <div id="ob-login-card" class="tile">
-        <button id="ob-login">Login</button>
-      </div>
-      <div id="ob-actions">
-        <div id="ob-create-card" class="action-card">
-          <h4>Create a New Wallet</h4>
-          <p>Generate a new recovery phrase and secure it on this device.</p>
-          <button id="ob-btn-create">Create a New Wallet</button>
-        </div>
-        <div id="ob-import-card" class="action-card">
-          <h4>Restore an Existing Wallet</h4>
-          <p>Import your existing recovery phrase to access funds.</p>
-          <button id="ob-btn-import">Restore an Existing Wallet</button>
-        </div>
-      </div>
-      <div id="ob-warning-panel" style="display:none;">
-        <h3>Read this before you continue</h3>
-        <p>Your wallet will be generated with a 24-word recovery phrase.</p>
-        <ul class="ob-list">
-          <li>It will be shown only once.</li>
-          <li>If you lose it, you cannot recover your wallet.</li>
-          <li>Write it down and store it somewhere safe and offline.</li>
-        </ul>
-        <div class="row row-between">
-          <button id="ob-warning-back" class="btn-ghost btn-inline">Go Back</button>
-          <button id="ob-warning-proceed" class="btn-danger btn-inline">Proceed!</button>
-        </div>
-      </div>
-      <div id="ob-create-panel" style="display:none;">
-        <h3>Create a new wallet</h3>
-        <p>Generates a fresh mnemonic and a device password for this wallet.</p>
-        <div class="muted">Your device password is generated automatically and shown once.</div>
-        <label>HRP</label>
-        <input id="ob-new-hrp" value="tpc">
-        <button id="ob-create">Generate Wallet</button>
-      </div>
-      <div id="ob-mnemonic-panel" style="display:none;">
-        <h3 id="ob-secret-title">Your recovery phrase</h3>
-        <p id="ob-secret-desc">Write this down and store it securely. Anyone with this phrase can control your funds.</p>
-        <div id="ob-mnemonic-wrap">
-          <textarea id="ob-mnemonic" readonly></textarea>
-        </div>
-        <div class="mt-12">
-          <label>Device password (save this)</label>
-          <div class="row row-tight">
-            <input id="ob-password" class="flex-1" readonly>
-            <button id="ob-copy-password" class="btn-inline">Copy</button>
+      <div id="ob-right">
+        <div id="ob-actions">
+          <div id="ob-create-card" class="action-card">
+            <h4>Create a New Wallet</h4>
+            <p>Generate a new recovery phrase and secure it on this device.</p>
+            <button id="ob-btn-create">Create a New Wallet</button>
           </div>
-          <div class="muted">You'll need this password to unlock the wallet on this device.</div>
+          <div id="ob-import-card" class="action-card">
+            <h4>Restore an Existing Wallet</h4>
+            <p>Import your existing recovery phrase to access funds.</p>
+            <button id="ob-btn-import">Restore an Existing Wallet</button>
+          </div>
+          <div id="ob-login-card" class="action-card">
+            <h4>Already have a wallet?</h4>
+            <button id="ob-login">Login</button>
+          </div>
         </div>
-        <button id="ob-mnemonic-done">Continue</button>
-      </div>
-      <div id="ob-import-panel" style="display:none;">
-        <h3>Restore existing wallet</h3>
-        <p>Paste your mnemonic to restore an existing account.</p>
-        <div class="muted">A device password will be generated for you and shown once.</div>
-        <label>Mnemonic</label>
-        <input id="ob-import-mnemonic" placeholder="twelve or twenty-four words">
-        <label>HRP</label>
-        <input id="ob-import-hrp" value="tpc">
-        <button id="ob-import">Restore Wallet</button>
+        <div id="ob-warning-panel" style="display:none;">
+          <h3>Read this before you continue</h3>
+          <p>Your wallet will be generated with a 24-word recovery phrase.</p>
+          <ul class="ob-list">
+            <li>It will be shown only once.</li>
+            <li>If you lose it, you cannot recover your wallet.</li>
+            <li>Write it down and store it somewhere safe and offline.</li>
+          </ul>
+          <div class="row row-between">
+            <button id="ob-warning-back" class="btn-ghost btn-inline">Go Back</button>
+            <button id="ob-warning-proceed" class="btn-danger btn-inline">Proceed!</button>
+          </div>
+        </div>
+        <div id="ob-create-panel" style="display:none;">
+          <h3>Create a new wallet</h3>
+          <p>Generates a fresh mnemonic and a device password for this wallet.</p>
+          <div class="muted">Your device password is generated automatically and shown once.</div>
+          <label>HRP</label>
+          <input id="ob-new-hrp" value="tpc">
+          <button id="ob-create">Generate Wallet</button>
+        </div>
+        <div id="ob-mnemonic-panel" style="display:none;">
+          <h3 id="ob-secret-title">Your recovery phrase</h3>
+          <p id="ob-secret-desc">Write this down and store it securely. Anyone with this phrase can control your funds.</p>
+          <div id="ob-mnemonic-wrap">
+            <textarea id="ob-mnemonic" readonly></textarea>
+          </div>
+          <div class="mt-12">
+            <label>Device password (save this)</label>
+            <div class="row row-tight">
+              <input id="ob-password" class="flex-1" readonly>
+              <button id="ob-copy-password" class="btn-inline">Copy</button>
+            </div>
+            <div class="muted">You'll need this password to unlock the wallet on this device.</div>
+          </div>
+          <button id="ob-mnemonic-done">Continue</button>
+        </div>
+        <div id="ob-import-panel" style="display:none;">
+          <h3>Restore existing wallet</h3>
+          <p>Paste your mnemonic to restore an existing account.</p>
+          <div class="muted">A device password will be generated for you and shown once.</div>
+          <label>Mnemonic</label>
+          <input id="ob-import-mnemonic" placeholder="twelve or twenty-four words">
+          <label>HRP</label>
+          <input id="ob-import-hrp" value="tpc">
+          <button id="ob-import">Restore Wallet</button>
+        </div>
       </div>
     </div>
   </div>
@@ -699,20 +720,29 @@
     }
 
     // Onboarding
-    function showOnboard() { document.getElementById('onboard').style.display = 'flex'; }
-    function hideOnboard() { document.getElementById('onboard').style.display = 'none'; }
+    function showOnboard() {
+      document.body.classList.add('onboard-open');
+      document.getElementById('onboard').style.display = 'flex';
+    }
+    function hideOnboard() {
+      document.body.classList.remove('onboard-open');
+      document.getElementById('onboard').style.display = 'none';
+    }
     function setObMode(mode) {
+      const panel = document.querySelector('#onboard .panel');
       const hero = document.getElementById('ob-hero');
-      const login = document.getElementById('ob-login-card');
       const actions = document.getElementById('ob-actions');
       const warning = document.getElementById('ob-warning-panel');
       const create = document.getElementById('ob-create-panel');
       const importPanel = document.getElementById('ob-import-panel');
       const mnemonic = document.getElementById('ob-mnemonic-panel');
       const isHero = mode === 'hero';
-      hero.style.display = isHero ? 'block' : 'none';
-      login.style.display = isHero ? 'flex' : 'none';
-      actions.style.display = isHero ? 'contents' : 'none';
+      const isWarning = mode === 'warning';
+      hero.style.display = isWarning ? 'none' : 'flex';
+      if (panel) {
+        panel.classList.toggle('ob-single', isWarning);
+      }
+      actions.style.display = isHero ? 'flex' : 'none';
       warning.style.display = mode === 'warning' ? 'block' : 'none';
       create.style.display = mode === 'create' ? 'block' : 'none';
       importPanel.style.display = mode === 'import' ? 'block' : 'none';
