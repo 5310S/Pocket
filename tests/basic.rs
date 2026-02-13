@@ -1,5 +1,4 @@
 use pocket_lib::{addr_from_mnemonic, BuildKind};
-use serde_json;
 
 #[test]
 fn addr_from_mnemonic_works() {

@@ -2,7 +2,7 @@ use clap::{Parser, Subcommand};
 use pocket_lib::{
     addr_from_mnemonic, balance, build_and_sign_transfer, chain_head, difficulty, export_mnemonic,
     gen_key, import_mnemonic, init_keystore, load_config, load_keystore, load_profile, save_config,
-    save_profile, submit_tx, BuildKind, Config, PocketError, Profile, TxBuildRequest,
+    save_profile, submit_tx, BuildKind, PocketError, Profile, TxBuildRequest,
 };
 
 #[derive(Parser)]
@@ -163,11 +163,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             .map(|i| serde_json::to_string_pretty(&i).unwrap()),
         Commands::Export { password } => export_mnemonic(&password)
             .map(|m| serde_json::to_string_pretty(&serde_json::json!({"mnemonic": m})).unwrap()),
-        Commands::SetConfig { rpc, token } => save_config(&Config {
-            rpc_base: rpc,
-            token,
-        })
-        .map(|_| "{\"status\":\"ok\"}".into()),
+        Commands::SetConfig { rpc, token } => {
+            let mut cfg = load_config().unwrap_or_default();
+            cfg.rpc_base = rpc;
+            cfg.token = token;
+            save_config(&cfg).map(|_| "{\"status\":\"ok\"}".into())
+        }
         Commands::ShowConfig => load_config().map(|c| serde_json::to_string_pretty(&c).unwrap()),
         Commands::SetPayout {
             address,

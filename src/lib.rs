@@ -58,7 +58,7 @@ const CONFIG_PATH: &str = "~/.pocket/config.json";
 const PROFILE_PATH: &str = "~/.pocket/profile.json";
 const ENV_TLS_INSECURE: &str = "POCKET_TLS_INSECURE";
 const ENV_PENDING_POOL: &str = "PENDING_POOL_PATH";
-const DEFAULT_P2P_BOOTSTRAP: &[&str] = &["93.127.216.241:50051"];
+const DEFAULT_P2P_BOOTSTRAP: &[&str] = &["93.127.216.241:3737"];
 
 #[derive(Serialize, Deserialize, Clone, Default)]
 pub struct Config {
@@ -151,6 +151,51 @@ pub enum BuildKind {
     },
 }
 
+// Transaction wire format (must match Lantern consensus/RPC types).
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+pub(crate) enum TxKind {
+    Transfer {
+        to: String,
+        amount: u128,
+    },
+    Stake {
+        amount: u128,
+        payout: String,
+        #[serde(default)]
+        commission_bps: u16,
+    },
+    Unbond {
+        amount: u128,
+    },
+    Slash {
+        target: String,
+        amount: u128,
+    },
+    Unjail {
+        validator: String,
+    },
+    UpdateValidator {
+        payout: Option<String>,
+        commission_bps: Option<u16>,
+    },
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+pub(crate) struct Transaction {
+    from: String,
+    nonce: u64,
+    kind: TxKind,
+    fee: u128,
+    #[serde(default)]
+    timestamp: u64,
+    #[serde(default)]
+    chain_id: String,
+    #[serde(default)]
+    signature: Option<Vec<u8>>,
+    #[serde(default)]
+    pubkey_hex: Option<String>,
+}
+
 fn address_matches_chain(addr: &str, chain_id: &str) -> bool {
     let hrp = if chain_id.starts_with("peace-mainnet") {
         "pc"
@@ -196,8 +241,7 @@ fn account_leaf_hash(addr: &str, account: &AccountState) -> Result<[u8; 32], Poc
         account: &'a AccountState,
     }
     let leaf = AccountLeaf { addr, account };
-    let bytes =
-        serde_json::to_vec(&leaf).map_err(|e| PocketError::Proof(e.to_string()))?;
+    let bytes = serde_json::to_vec(&leaf).map_err(|e| PocketError::Proof(e.to_string()))?;
     Ok(state_leaf_hash(&format!("account:{}", addr), &bytes))
 }
 
@@ -318,7 +362,10 @@ fn p2p_bootstrap(cfg: &Config) -> Vec<String> {
     if !cfg.p2p_bootstrap.is_empty() {
         return cfg.p2p_bootstrap.clone();
     }
-    DEFAULT_P2P_BOOTSTRAP.iter().map(|s| s.to_string()).collect()
+    DEFAULT_P2P_BOOTSTRAP
+        .iter()
+        .map(|s| s.to_string())
+        .collect()
 }
 
 pub fn save_profile(profile: &Profile) -> Result<(), PocketError> {
@@ -662,45 +709,48 @@ fn pending_nonce_from_pool(path: &str, addr: &str) -> Option<u64> {
 
 // --- Tx build/sign (offline) ---
 
-fn tx_signing_bytes(tx: &serde_json::Value) -> Result<Vec<u8>, PocketError> {
-    let mut map = tx
-        .as_object()
-        .cloned()
-        .ok_or_else(|| PocketError::Crypto("tx not object".into()))?;
-    map.remove("signature");
-    let without_sig = serde_json::Value::Object(map);
-    serde_json::to_vec(&without_sig).map_err(|e| PocketError::Crypto(e.to_string()))
+#[derive(Serialize)]
+struct CanonicalTx<'a> {
+    chain_id: &'a str,
+    from: &'a str,
+    nonce: u64,
+    fee: u128,
+    timestamp: u64,
+    kind: &'a TxKind,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pubkey_hex: Option<&'a String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    signature: Option<&'a Vec<u8>>,
 }
 
-fn tx_id_bytes(tx: &serde_json::Value) -> Result<[u8; 32], PocketError> {
-    let bytes = serde_json::to_vec(tx).map_err(|e| PocketError::Crypto(e.to_string()))?;
+fn canonical_tx_bytes(tx: &Transaction, include_signature: bool) -> Result<Vec<u8>, PocketError> {
+    let view = CanonicalTx {
+        chain_id: tx.chain_id.as_str(),
+        from: tx.from.as_str(),
+        nonce: tx.nonce,
+        fee: tx.fee,
+        timestamp: tx.timestamp,
+        kind: &tx.kind,
+        pubkey_hex: tx.pubkey_hex.as_ref(),
+        signature: if include_signature {
+            tx.signature.as_ref()
+        } else {
+            None
+        },
+    };
+    serde_json::to_vec(&view).map_err(|e| PocketError::Crypto(e.to_string()))
+}
+
+fn tx_signing_bytes(tx: &Transaction) -> Result<Vec<u8>, PocketError> {
+    canonical_tx_bytes(tx, false)
+}
+
+pub(crate) fn tx_id_bytes(tx: &Transaction) -> Result<[u8; 32], PocketError> {
+    let bytes = canonical_tx_bytes(tx, true)?;
     let digest = Sha256::digest(bytes);
     let mut out = [0u8; 32];
     out.copy_from_slice(&digest);
     Ok(out)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn signing_bytes_ignore_signature() {
-        let mut tx = serde_json::json!({
-            "from": "tpc1test",
-            "nonce": 1,
-            "fee": 1,
-            "timestamp": 123,
-            "chain_id": "peace-testnet",
-            "kind": {"Transfer": {"to": "tpc1dest", "amount": 2}},
-            "pubkey_hex": "00".repeat(32),
-            "signature": "aa"
-        });
-        let a = tx_signing_bytes(&tx).unwrap();
-        tx["signature"] = serde_json::json!("bb");
-        let b = tx_signing_bytes(&tx).unwrap();
-        assert_eq!(a, b, "signature must not affect signing bytes");
-    }
 }
 
 pub fn build_and_sign_transfer(
@@ -726,70 +776,51 @@ pub fn build_and_sign_transfer(
             .and_then(|p| pending_nonce_from_pool(p, &info.address))
             .unwrap_or(ledger_nonce),
     };
-    // Construct minimal tx map per spec.
-    let mut tx_map = serde_json::Map::new();
-    tx_map.insert(
-        "from".into(),
-        serde_json::Value::String(info.address.clone()),
-    );
-    tx_map.insert(
-        "nonce".into(),
-        serde_json::Value::Number(serde_json::Number::from(chosen_nonce)),
-    );
-    tx_map.insert(
-        "fee".into(),
-        serde_json::Value::Number(serde_json::Number::from(req.fee)),
-    );
-    tx_map.insert(
-        "timestamp".into(),
-        serde_json::Value::Number(serde_json::Number::from(
-            req.timestamp.unwrap_or_else(|| now_ts()),
-        )),
-    );
-    tx_map.insert(
-        "chain_id".into(),
-        serde_json::Value::String(chain_id.clone()),
-    );
-    tx_map.insert(
-        "pubkey_hex".into(),
-        serde_json::Value::String(info.public_key_hex.clone()),
-    );
-    let kind_val = match req.kind {
-        BuildKind::Transfer { to, amount } => {
-            serde_json::json!({"Transfer": {"to": to, "amount": amount}})
-        }
+    let kind = match req.kind {
+        BuildKind::Transfer { to, amount } => TxKind::Transfer {
+            to,
+            amount: amount as u128,
+        },
         BuildKind::Stake {
             amount,
             payout,
             commission_bps,
-        } => {
-            serde_json::json!({"Stake": {"amount": amount, "payout": payout, "commission_bps": commission_bps}})
-        }
-        BuildKind::Unbond { amount } => serde_json::json!({"Unbond": {"amount": amount}}),
+        } => TxKind::Stake {
+            amount: amount as u128,
+            payout,
+            commission_bps,
+        },
+        BuildKind::Unbond { amount } => TxKind::Unbond {
+            amount: amount as u128,
+        },
         BuildKind::UpdateValidator {
             payout,
             commission_bps,
-        } => {
-            serde_json::json!({"UpdateValidator": {"payout": payout, "commission_bps": commission_bps}})
-        }
+        } => TxKind::UpdateValidator {
+            payout,
+            commission_bps,
+        },
     };
-    tx_map.insert("kind".into(), kind_val);
 
-    let mut tx_val = serde_json::Value::Object(tx_map);
-    let msg = tx_signing_bytes(&tx_val)?;
+    let mut tx = Transaction {
+        from: info.address.clone(),
+        nonce: chosen_nonce,
+        kind,
+        fee: req.fee as u128,
+        timestamp: req.timestamp.unwrap_or_else(now_ts),
+        chain_id: chain_id.clone(),
+        signature: None,
+        pubkey_hex: Some(info.public_key_hex.clone()),
+    };
+    let msg = tx_signing_bytes(&tx)?;
     let seed_bytes = Mnemonic::parse_in_normalized(Language::English, &info.mnemonic)
         .map_err(|e| PocketError::Mnemonic(e.to_string()))?
         .to_seed("");
     let sk = SigningKey::from_bytes(&seed_bytes[0..32].try_into().unwrap());
     let sig = sk.sign(&msg);
-    tx_val
-        .as_object_mut()
-        .ok_or_else(|| PocketError::Crypto("tx not object".into()))?
-        .insert(
-            "signature".into(),
-            serde_json::Value::String(hex::encode(sig.to_bytes())),
-        );
-    let txid = tx_id_bytes(&tx_val)?;
+    tx.signature = Some(sig.to_bytes().to_vec());
+    let txid = tx_id_bytes(&tx)?;
+    let tx_val = serde_json::to_value(&tx).map_err(|e| PocketError::Crypto(e.to_string()))?;
     Ok(TxEnvelope {
         tx: tx_val,
         tx_id: hex::encode(txid),
@@ -802,6 +833,27 @@ pub fn submit_tx(
     signed: &serde_json::Value,
 ) -> Result<String, PocketError> {
     let cfg = load_config().unwrap_or_default();
+
+    let peers = p2p_bootstrap(&cfg);
+    if !peers.is_empty() {
+        if let Ok(tx) = serde_json::from_value::<Transaction>(signed.clone()) {
+            let chain_id = if tx.chain_id.is_empty() {
+                "peace-testnet".to_string()
+            } else {
+                tx.chain_id.clone()
+            };
+            match p2p::submit_tx_p2p(&tx, &chain_id, &peers) {
+                Ok(res) => return Ok(res),
+                Err(e) => {
+                    // Fall back to HTTP if configured.
+                    if rpc.is_none() && cfg.rpc_base.is_none() {
+                        return Err(e);
+                    }
+                }
+            }
+        }
+    }
+
     let rpc_base = rpc
         .or(cfg.rpc_base.clone())
         .unwrap_or_else(|| "https://127.0.0.1:8645".to_string());
@@ -827,4 +879,70 @@ fn now_ts() -> u64 {
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_secs())
         .unwrap_or(0)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn signing_bytes_ignore_signature() {
+        let tx = Transaction {
+            from: "tpc1test".to_string(),
+            nonce: 1,
+            kind: TxKind::Transfer {
+                to: "tpc1dest".to_string(),
+                amount: 2,
+            },
+            fee: 1,
+            timestamp: 123,
+            chain_id: "peace-testnet".to_string(),
+            signature: Some(vec![0xaa; 64]),
+            pubkey_hex: Some("00".repeat(32)),
+        };
+        let a = tx_signing_bytes(&tx).unwrap();
+        let mut tx2 = tx.clone();
+        tx2.signature = Some(vec![0xbb; 64]);
+        let b = tx_signing_bytes(&tx2).unwrap();
+        assert_eq!(a, b, "signature must not affect signing bytes");
+    }
+
+    #[test]
+    fn peace_spec_transfer_vector_matches() {
+        // Keep in sync with lantern/docs/peace-spec.md canonical vectors.
+        let mut tx = Transaction {
+            from: "tpc1wvt60fl2y8cvzfwdf6fvdfhf9qavzn63jpdzqsy7xjvvgvzgthxs9gmanq".to_string(),
+            nonce: 0,
+            kind: TxKind::Transfer {
+                to: "tpc1k3avtp53c5r53q8ny295n7806l23t02zcn75cqaf6jmxe4kvxmaqudz4xe".to_string(),
+                amount: 25,
+            },
+            fee: 5,
+            timestamp: 1700000005,
+            chain_id: "peace-testnet".to_string(),
+            signature: None,
+            pubkey_hex: Some(
+                "7317a7a7ea21f0c125cd4e92c6a6e9283ac14f51905a20409e3498c430485dcd".to_string(),
+            ),
+        };
+
+        let expected_sign_hex = "7b22636861696e5f6964223a2270656163652d746573746e6574222c2266726f6d223a22747063317776743630666c32793863767a6677646636667664666866397161767a6e36336a70647a71737937786a767667767a677468787339676d616e71222c226e6f6e6365223a302c22666565223a352c2274696d657374616d70223a313730303030303030352c226b696e64223a7b225472616e73666572223a7b22746f223a22747063316b33617674703533633572353371386e793239356e373830366c32337430327a636e373563716166366a6d7865346b76786d617175647a347865222c22616d6f756e74223a32357d7d2c227075626b65795f686578223a2237333137613761376561323166306331323563643465393263366136653932383361633134663531393035613230343039653334393863343330343835646364227d";
+        let sign_bytes = canonical_tx_bytes(&tx, false).unwrap();
+        assert_eq!(
+            hex::encode(sign_bytes),
+            expected_sign_hex,
+            "signing bytes must match Peace spec vector"
+        );
+
+        // Now include the signature and validate tx_id.
+        let sig = hex::decode("81c8aeae5d72cfe490b051ec8416a62aebcafbef470f78150fa2a39893414f426c26d704f0e7346b115d711dc660dfd2cbf1b720c039c6267c78849177787808")
+            .unwrap();
+        tx.signature = Some(sig);
+        let txid = tx_id_bytes(&tx).unwrap();
+        assert_eq!(
+            hex::encode(txid),
+            "ac7888121ac4d8602f78f8513bebb41fc1d44324bb3314cadceca9015993e1b0",
+            "tx_id must match Peace spec vector"
+        );
+    }
 }

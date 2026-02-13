@@ -2,16 +2,16 @@ use std::io::{Read, Write};
 use std::net::{TcpStream, ToSocketAddrs};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-use bech32::{FromBase32, decode};
+use bech32::{decode, FromBase32};
 use ed25519_dalek::{Signature, Signer, SigningKey, VerifyingKey};
 use rand::rngs::OsRng;
 use rand::RngCore;
 use serde::{Deserialize, Serialize};
 
-use crate::{AccountState, BalanceInfo, PocketError};
+use crate::{AccountState, BalanceInfo, PocketError, Transaction};
 
 const PROTOCOL_VERSION: u32 = 2;
-const DEFAULT_P2P_PORT: u16 = 50051;
+const DEFAULT_P2P_PORT: u16 = 3737;
 const READ_TIMEOUT_SECS: u64 = 5;
 const MAX_FRAME_BYTES: usize = 512 * 1024;
 const FEATURE_MINING_ATTESTATION: &str = "mining-attestation";
@@ -119,16 +119,35 @@ enum P2PMessage {
     },
     Ping(u64),
     Pong(u64),
+    InvTx(Vec<[u8; 32]>),
+    GetTx(Vec<[u8; 32]>),
     Headers(Vec<HeaderBundle>),
-    GetHeaders { from: u64, to: Option<u64> },
-    GetAccountProof { addr: String },
+    GetHeaders {
+        from: u64,
+        to: Option<u64>,
+    },
+    GetAccountProof {
+        addr: String,
+    },
     AccountProof {
         proof: AccountProof,
         height: u64,
         chain_id: String,
     },
-    Disconnect { reason: String },
+    Gossip {
+        payload: GossipPayload,
+        pub_key: Vec<u8>,
+        signature: Vec<u8>,
+    },
+    Disconnect {
+        reason: String,
+    },
     Ignored,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+enum GossipPayload {
+    Tx(Transaction),
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -161,13 +180,39 @@ pub fn fetch_balance_p2p(addr: &str, peers: &[String]) -> Result<BalanceInfo, Po
     Err(last_err.unwrap_or_else(|| PocketError::Rpc("p2p failed".into())))
 }
 
+pub fn submit_tx_p2p(
+    tx: &Transaction,
+    chain_id: &str,
+    peers: &[String],
+) -> Result<String, PocketError> {
+    if peers.is_empty() {
+        return Err(PocketError::Rpc("p2p peer list empty".into()));
+    }
+    let tx_id = crate::tx_id_bytes(tx)?;
+    let mut last_err: Option<PocketError> = None;
+    for peer in peers {
+        match submit_tx_to_peer(tx, chain_id, peer, &tx_id) {
+            Ok(()) => {
+                let resp = serde_json::json!({
+                    "status": "gossiped",
+                    "peer": peer,
+                    "tx_id": hex::encode(tx_id),
+                });
+                return Ok(resp.to_string());
+            }
+            Err(e) => last_err = Some(e),
+        }
+    }
+    Err(last_err.unwrap_or_else(|| PocketError::Rpc("p2p submit failed".into())))
+}
+
 fn fetch_balance_from_peer(
     addr: &str,
     peer: &str,
     chain_id: &str,
 ) -> Result<BalanceInfo, PocketError> {
     let mut stream = connect_peer(peer)?;
-    let hello = perform_handshake(&mut stream, chain_id)?;
+    let (hello, _signing) = perform_handshake(&mut stream, chain_id)?;
     if hello.chain_id != chain_id {
         return Err(PocketError::Rpc("p2p chain_id mismatch".into()));
     }
@@ -197,6 +242,49 @@ fn fetch_balance_from_peer(
     })
 }
 
+fn submit_tx_to_peer(
+    tx: &Transaction,
+    chain_id: &str,
+    peer: &str,
+    tx_id: &[u8; 32],
+) -> Result<(), PocketError> {
+    let mut stream = connect_peer(peer)?;
+    let (_hello, signing) = perform_handshake(&mut stream, chain_id)?;
+    write_msg(&mut stream, &P2PMessage::InvTx(vec![*tx_id]))?;
+    let start = Instant::now();
+    let mut scratch = Vec::new();
+    loop {
+        if start.elapsed() > Duration::from_secs(READ_TIMEOUT_SECS) {
+            return Err(PocketError::Rpc("p2p gettx timeout".into()));
+        }
+        let msg = read_msg(&mut stream, &mut scratch)?;
+        match msg {
+            Some(P2PMessage::GetTx(ids)) => {
+                if ids.iter().any(|id| id == tx_id) {
+                    let payload = GossipPayload::Tx(tx.clone());
+                    let sig = signing.sign(
+                        &serde_json::to_vec(&payload)
+                            .map_err(|e| PocketError::Rpc(e.to_string()))?,
+                    );
+                    let response = P2PMessage::Gossip {
+                        payload,
+                        pub_key: signing.verifying_key().to_bytes().to_vec(),
+                        signature: sig.to_bytes().to_vec(),
+                    };
+                    write_msg(&mut stream, &response)?;
+                    return Ok(());
+                }
+            }
+            Some(P2PMessage::Ping(ts)) => write_msg(&mut stream, &P2PMessage::Pong(ts))?,
+            Some(P2PMessage::Disconnect { reason }) => {
+                return Err(PocketError::Rpc(format!("p2p disconnect: {reason}")))
+            }
+            Some(_) => continue,
+            None => return Err(PocketError::Rpc("p2p closed".into())),
+        }
+    }
+}
+
 fn connect_peer(addr: &str) -> Result<TcpStream, PocketError> {
     let target = normalize_peer_addr(addr);
     let mut addrs = target
@@ -224,7 +312,10 @@ fn normalize_peer_addr(addr: &str) -> String {
     }
 }
 
-fn perform_handshake(stream: &mut TcpStream, chain_id: &str) -> Result<HelloPayload, PocketError> {
+fn perform_handshake(
+    stream: &mut TcpStream,
+    chain_id: &str,
+) -> Result<(HelloPayload, SigningKey), PocketError> {
     let signing = SigningKey::generate(&mut OsRng);
     let mut node_bytes = [0u8; 8];
     OsRng.fill_bytes(&mut node_bytes);
@@ -247,7 +338,8 @@ fn perform_handshake(stream: &mut TcpStream, chain_id: &str) -> Result<HelloPayl
         vpn_endpoint: None,
         vpn_kernel: None,
     };
-    let sig = signing.sign(&serde_json::to_vec(&hello_payload).map_err(|e| PocketError::Rpc(e.to_string()))?);
+    let sig = signing
+        .sign(&serde_json::to_vec(&hello_payload).map_err(|e| PocketError::Rpc(e.to_string()))?);
     let hello = P2PMessage::Hello {
         node_id,
         role: NodeRole::Light,
@@ -312,7 +404,7 @@ fn perform_handshake(stream: &mut TcpStream, chain_id: &str) -> Result<HelloPayl
                     vpn_kernel,
                 };
                 verify_hello(&payload, &pub_key, &signature)?;
-                return Ok(payload);
+                return Ok((payload, signing));
             }
             Some(P2PMessage::Ping(ts)) => {
                 write_msg(stream, &P2PMessage::Pong(ts))?;
@@ -394,7 +486,10 @@ fn request_account_proof(stream: &mut TcpStream, addr: &str) -> Result<AccountPr
     }
 }
 
-fn read_msg(stream: &mut TcpStream, scratch: &mut Vec<u8>) -> Result<Option<P2PMessage>, PocketError> {
+fn read_msg(
+    stream: &mut TcpStream,
+    scratch: &mut Vec<u8>,
+) -> Result<Option<P2PMessage>, PocketError> {
     let frame = match read_frame(stream, scratch)? {
         Some(f) => f,
         None => return Ok(None),
@@ -406,15 +501,10 @@ fn read_msg(stream: &mut TcpStream, scratch: &mut Vec<u8>) -> Result<Option<P2PM
         .and_then(|obj| obj.keys().next().map(|k| k.as_str().to_string()))
         .unwrap_or_default();
     let msg = match key.as_str() {
-        "Hello"
-        | "Ping"
-        | "Pong"
-        | "Headers"
-        | "GetHeaders"
-        | "GetAccountProof"
-        | "AccountProof"
-        | "Disconnect" => serde_json::from_value(value)
-            .map_err(|e| PocketError::Rpc(e.to_string()))?,
+        "Hello" | "Ping" | "Pong" | "InvTx" | "GetTx" | "Headers" | "GetHeaders"
+        | "GetAccountProof" | "AccountProof" | "Gossip" | "Disconnect" => {
+            serde_json::from_value(value).map_err(|e| PocketError::Rpc(e.to_string()))?
+        }
         _ => P2PMessage::Ignored,
     };
     Ok(Some(msg))
@@ -509,7 +599,8 @@ fn chain_id_hrp(chain_id: &str) -> Option<&'static str> {
 
 fn address_to_pubkey_bytes(addr: &str, chain_id: &str) -> Result<[u8; 32], PocketError> {
     let (hrp, data, _) = decode(addr).map_err(|e| PocketError::Proof(e.to_string()))?;
-    let expected = chain_id_hrp(chain_id).ok_or_else(|| PocketError::Proof("bad chain_id".into()))?;
+    let expected =
+        chain_id_hrp(chain_id).ok_or_else(|| PocketError::Proof("bad chain_id".into()))?;
     if hrp != expected {
         return Err(PocketError::Proof("hrp mismatch".into()));
     }
