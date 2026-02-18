@@ -2,7 +2,7 @@ use clap::{Parser, Subcommand};
 use pocket_lib::{
     addr_from_mnemonic, balance, build_and_sign_transfer, chain_head, difficulty, export_mnemonic,
     gen_key, import_mnemonic, init_keystore, load_config, load_keystore, load_profile, save_config,
-    save_profile, submit_tx, BuildKind, PocketError, Profile, TxBuildRequest,
+    save_profile, submit_tx, BuildKind, PocketError, TxBuildRequest,
 };
 
 #[derive(Parser)]
@@ -49,6 +49,10 @@ enum Commands {
         rpc: Option<String>,
         #[arg(long)]
         token: Option<String>,
+        #[arg(long, default_value_t = false)]
+        clear_rpc: bool,
+        #[arg(long, default_value_t = false)]
+        clear_token: bool,
     },
     /// Save mining payout profile
     SetPayout {
@@ -56,6 +60,8 @@ enum Commands {
         address: String,
         #[arg(long)]
         attestation: Option<String>,
+        #[arg(long, default_value_t = false)]
+        clear_attestation: bool,
     },
     /// Show saved config
     ShowConfig,
@@ -163,21 +169,40 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             .map(|i| serde_json::to_string_pretty(&i).unwrap()),
         Commands::Export { password } => export_mnemonic(&password)
             .map(|m| serde_json::to_string_pretty(&serde_json::json!({"mnemonic": m})).unwrap()),
-        Commands::SetConfig { rpc, token } => {
+        Commands::SetConfig {
+            rpc,
+            token,
+            clear_rpc,
+            clear_token,
+        } => {
             let mut cfg = load_config().unwrap_or_default();
-            cfg.rpc_base = rpc;
-            cfg.token = token;
+            if clear_rpc {
+                cfg.rpc_base = None;
+            } else if let Some(value) = rpc {
+                cfg.rpc_base = Some(value);
+            }
+            if clear_token {
+                cfg.token = None;
+            } else if let Some(value) = token {
+                cfg.token = Some(value);
+            }
             save_config(&cfg).map(|_| "{\"status\":\"ok\"}".into())
         }
         Commands::ShowConfig => load_config().map(|c| serde_json::to_string_pretty(&c).unwrap()),
         Commands::SetPayout {
             address,
             attestation,
-        } => save_profile(&Profile {
-            payout_address: Some(address),
-            attestation_token: attestation,
-        })
-        .map(|_| "{\"status\":\"ok\"}".into()),
+            clear_attestation,
+        } => {
+            let mut profile = load_profile().unwrap_or_default();
+            profile.payout_address = Some(address);
+            if clear_attestation {
+                profile.attestation_token = None;
+            } else if let Some(value) = attestation {
+                profile.attestation_token = Some(value);
+            }
+            save_profile(&profile).map(|_| "{\"status\":\"ok\"}".into())
+        }
         Commands::ShowProfile => load_profile().map(|p| serde_json::to_string_pretty(&p).unwrap()),
         Commands::Balance {
             password,
