@@ -1,8 +1,9 @@
 use clap::{Parser, Subcommand};
 use pocket_lib::{
-    addr_from_mnemonic, balance, build_and_sign_transfer, chain_head, difficulty, export_mnemonic,
-    gen_key, import_mnemonic, init_keystore, load_config, load_keystore, load_profile, save_config,
-    save_profile, submit_tx, BuildKind, PocketError, TxBuildRequest,
+    addr_from_mnemonic, balance, build_and_sign_external, build_and_sign_transfer, chain_head,
+    difficulty, export_mnemonic, gen_key, import_mnemonic, init_keystore, load_config,
+    load_keystore, load_profile, save_config, save_profile, serve_profile_http, submit_tx,
+    BuildKind, PocketError, TxBuildRequest,
 };
 
 #[derive(Parser)]
@@ -54,6 +55,17 @@ enum Commands {
         #[arg(long, default_value_t = false)]
         clear_token: bool,
     },
+    /// Configure a generic external signer command for hardware/HSM integrations
+    SetExternalSigner {
+        #[arg(long)]
+        command: Option<String>,
+        #[arg(long)]
+        address: Option<String>,
+        #[arg(long)]
+        pubkey_hex: Option<String>,
+        #[arg(long, default_value_t = false)]
+        clear: bool,
+    },
     /// Save mining payout profile
     SetPayout {
         #[arg(long)]
@@ -67,6 +79,18 @@ enum Commands {
     ShowConfig,
     /// Show saved profile
     ShowProfile,
+    /// Serve payout/profile data for local tools on loopback
+    ServeProfile {
+        /// Bind address for the local profile API
+        #[arg(long, default_value = "127.0.0.1:9467")]
+        bind: String,
+        /// Optional bearer token required for GET /profile
+        #[arg(long)]
+        token: Option<String>,
+        /// Serve exactly one request and exit
+        #[arg(long, default_value_t = false)]
+        once: bool,
+    },
     /// Initialize an encrypted keystore
     Init {
         #[arg(long)]
@@ -143,6 +167,39 @@ enum Commands {
         #[arg(long)]
         pending_pool: Option<String>,
     },
+    /// Build, sign, and submit a transaction using the configured external signer hook
+    SendExternal {
+        /// Tx kind: transfer | stake | unbond | update-validator
+        #[arg(long, default_value = "transfer")]
+        kind: String,
+        /// Destination for transfers
+        #[arg(long)]
+        to: Option<String>,
+        /// Amount (transfer / stake / unbond)
+        #[arg(long)]
+        amount: Option<u64>,
+        /// Payout address (stake / update-validator)
+        #[arg(long)]
+        payout: Option<String>,
+        /// Commission basis points (stake / update-validator)
+        #[arg(long)]
+        commission_bps: Option<u16>,
+        #[arg(long, default_value_t = 1)]
+        fee: u64,
+        #[arg(long)]
+        nonce: Option<u64>,
+        #[arg(long)]
+        timestamp: Option<u64>,
+        #[arg(long)]
+        chain_id: Option<String>,
+        #[arg(long)]
+        rpc: Option<String>,
+        #[arg(long)]
+        token: Option<String>,
+        /// Optional path to Lantern tx pool file to include pending nonces
+        #[arg(long)]
+        pending_pool: Option<String>,
+    },
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -188,6 +245,30 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
             save_config(&cfg).map(|_| "{\"status\":\"ok\"}".into())
         }
+        Commands::SetExternalSigner {
+            command,
+            address,
+            pubkey_hex,
+            clear,
+        } => {
+            let mut cfg = load_config().unwrap_or_default();
+            if clear {
+                cfg.external_signer_command = None;
+                cfg.external_signer_address = None;
+                cfg.external_signer_pubkey_hex = None;
+            } else {
+                if let Some(value) = command {
+                    cfg.external_signer_command = Some(value);
+                }
+                if let Some(value) = address {
+                    cfg.external_signer_address = Some(value);
+                }
+                if let Some(value) = pubkey_hex {
+                    cfg.external_signer_pubkey_hex = Some(value);
+                }
+            }
+            save_config(&cfg).map(|_| "{\"status\":\"ok\"}".into())
+        }
         Commands::ShowConfig => load_config().map(|c| serde_json::to_string_pretty(&c).unwrap()),
         Commands::SetPayout {
             address,
@@ -204,6 +285,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             save_profile(&profile).map(|_| "{\"status\":\"ok\"}".into())
         }
         Commands::ShowProfile => load_profile().map(|p| serde_json::to_string_pretty(&p).unwrap()),
+        Commands::ServeProfile { bind, token, once } => {
+            serve_profile_http(&bind, token, once).map(|bound| {
+                serde_json::to_string_pretty(&serde_json::json!({
+                    "status": "serving",
+                    "bind": bound,
+                    "routes": ["/health", "/payout", "/profile"]
+                }))
+                .unwrap()
+            })
+        }
         Commands::Balance {
             password,
             rpc,
@@ -251,6 +342,62 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             };
             let env = build_and_sign_transfer(
                 &password,
+                TxBuildRequest {
+                    kind: kind_enum,
+                    fee,
+                    nonce,
+                    timestamp,
+                    chain_id,
+                    memo: None,
+                    pending_pool,
+                },
+                rpc.clone(),
+                token.clone(),
+            )?;
+            let submit = submit_tx(rpc, token, &env.tx)?;
+            Ok(serde_json::to_string_pretty(
+                &serde_json::json!({"tx_id": env.tx_id, "submit": submit}),
+            )
+            .unwrap())
+        }
+        Commands::SendExternal {
+            kind,
+            to,
+            amount,
+            payout,
+            commission_bps,
+            fee,
+            nonce,
+            timestamp,
+            chain_id,
+            rpc,
+            token,
+            pending_pool,
+        } => {
+            let kind_enum = match kind.as_str() {
+                "transfer" => BuildKind::Transfer {
+                    to: to.ok_or_else(|| PocketError::Rpc("missing --to for transfer".into()))?,
+                    amount: amount
+                        .ok_or_else(|| PocketError::Rpc("missing --amount for transfer".into()))?,
+                },
+                "stake" => BuildKind::Stake {
+                    amount: amount
+                        .ok_or_else(|| PocketError::Rpc("missing --amount for stake".into()))?,
+                    payout: payout
+                        .ok_or_else(|| PocketError::Rpc("missing --payout for stake".into()))?,
+                    commission_bps: commission_bps.unwrap_or(0),
+                },
+                "unbond" => BuildKind::Unbond {
+                    amount: amount
+                        .ok_or_else(|| PocketError::Rpc("missing --amount for unbond".into()))?,
+                },
+                "update-validator" => BuildKind::UpdateValidator {
+                    payout,
+                    commission_bps,
+                },
+                other => Err(PocketError::Rpc(format!("unsupported kind {other}")))?,
+            };
+            let env = build_and_sign_external(
                 TxBuildRequest {
                     kind: kind_enum,
                     fee,

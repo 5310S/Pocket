@@ -1,5 +1,6 @@
 use std::fs;
 use std::path::PathBuf;
+use std::process::{Command, Stdio};
 
 use aes_gcm::{
     aead::{Aead, KeyInit},
@@ -9,7 +10,7 @@ use argon2::Argon2;
 use base64::{engine::general_purpose, Engine as _};
 use bech32::{encode, ToBase32, Variant};
 use bip39::{Language, Mnemonic};
-use ed25519_dalek::Signer;
+use ed25519_dalek::{Signer, Verifier};
 use ed25519_dalek::{SigningKey, VerifyingKey};
 use rand::rngs::OsRng;
 use rand::RngCore;
@@ -18,6 +19,7 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use strum::{Display, EnumString};
 use thiserror::Error;
+use tiny_http::{Header, Method, Response, Server, StatusCode};
 
 mod p2p;
 
@@ -58,6 +60,7 @@ const CONFIG_PATH: &str = "~/.pocket/config.json";
 const PROFILE_PATH: &str = "~/.pocket/profile.json";
 const ENV_TLS_INSECURE: &str = "POCKET_TLS_INSECURE";
 const ENV_PENDING_POOL: &str = "PENDING_POOL_PATH";
+const ENV_PROFILE_TOKEN: &str = "POCKET_PROFILE_TOKEN";
 const DEFAULT_P2P_BOOTSTRAP: &[&str] = &["93.127.216.241:3737"];
 
 #[derive(Serialize, Deserialize, Clone, Default)]
@@ -66,6 +69,12 @@ pub struct Config {
     pub token: Option<String>,
     #[serde(default)]
     pub p2p_bootstrap: Vec<String>,
+    #[serde(default)]
+    pub external_signer_command: Option<String>,
+    #[serde(default)]
+    pub external_signer_address: Option<String>,
+    #[serde(default)]
+    pub external_signer_pubkey_hex: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Default)]
@@ -209,6 +218,18 @@ fn address_matches_chain(addr: &str, chain_id: &str) -> bool {
 
 fn hrp_valid(hrp: &str) -> bool {
     matches!(hrp, "pc" | "tpc")
+}
+
+fn hrp_for_chain(chain_id: &str) -> Result<&'static str, PocketError> {
+    if chain_id.starts_with("peace-mainnet") {
+        Ok("pc")
+    } else if chain_id.starts_with("peace-testnet") {
+        Ok("tpc")
+    } else {
+        Err(PocketError::Crypto(format!(
+            "unsupported chain_id for address derivation: {chain_id}"
+        )))
+    }
 }
 
 fn bech32_address(hrp: &str, vk: &VerifyingKey) -> Result<String, PocketError> {
@@ -383,6 +404,93 @@ pub fn load_profile() -> Result<Profile, PocketError> {
         Ok(txt) => serde_json::from_str(&txt).map_err(|e| PocketError::Io(e.to_string())),
         Err(_) => Ok(Profile::default()),
     }
+}
+
+fn profile_payload(include_attestation: bool) -> Result<String, PocketError> {
+    let profile = load_profile().unwrap_or_default();
+    let body = if include_attestation {
+        serde_json::json!({
+            "payout_address": profile.payout_address,
+            "attestation_token": profile.attestation_token,
+        })
+    } else {
+        serde_json::json!({
+            "payout_address": profile.payout_address,
+        })
+    };
+    serde_json::to_string_pretty(&body).map_err(|e| PocketError::Io(e.to_string()))
+}
+
+fn has_profile_auth(headers: &[Header], required_token: &str) -> bool {
+    if required_token.is_empty() {
+        return true;
+    }
+    headers.iter().any(|header| {
+        header.field.equiv("Authorization")
+            && header.value.as_str().trim() == format!("Bearer {required_token}")
+    })
+}
+
+pub fn serve_profile_http(
+    bind: &str,
+    token: Option<String>,
+    once: bool,
+) -> Result<String, PocketError> {
+    let server = Server::http(bind).map_err(|e| PocketError::Io(e.to_string()))?;
+    let actual_bind = server
+        .server_addr()
+        .to_ip()
+        .map(|addr| addr.to_string())
+        .unwrap_or_else(|| bind.to_string());
+    let required_token = token
+        .or_else(|| std::env::var(ENV_PROFILE_TOKEN).ok())
+        .unwrap_or_default();
+    eprintln!("Pocket profile API listening on http://{actual_bind}");
+
+    loop {
+        let request = server.recv().map_err(|e| PocketError::Io(e.to_string()))?;
+        let url = request.url().split('?').next().unwrap_or("/");
+        let method = request.method().clone();
+
+        let send_json =
+            |request: tiny_http::Request, status: u16, body: String| -> Result<(), PocketError> {
+                let mut response = Response::from_string(body).with_status_code(StatusCode(status));
+                if let Ok(header) = Header::from_bytes(
+                    &b"Content-Type"[..],
+                    &b"application/json; charset=utf-8"[..],
+                ) {
+                    response = response.with_header(header);
+                }
+                request
+                    .respond(response)
+                    .map_err(|e| PocketError::Io(e.to_string()))
+            };
+
+        match (method, url) {
+            (Method::Get, "/health") => {
+                send_json(request, 200, "{\"status\":\"ok\"}".to_string())?;
+            }
+            (Method::Get, "/payout") => {
+                send_json(request, 200, profile_payload(false)?)?;
+            }
+            (Method::Get, "/profile") => {
+                if !has_profile_auth(request.headers(), &required_token) {
+                    send_json(request, 401, "{\"error\":\"unauthorized\"}".to_string())?;
+                } else {
+                    send_json(request, 200, profile_payload(true)?)?;
+                }
+            }
+            _ => {
+                send_json(request, 404, "{\"error\":\"not_found\"}".to_string())?;
+            }
+        }
+
+        if once {
+            break;
+        }
+    }
+
+    Ok(actual_bind)
 }
 
 fn derive_key(password: &str, salt: &[u8]) -> Result<[u8; 32], PocketError> {
@@ -753,27 +861,27 @@ pub(crate) fn tx_id_bytes(tx: &Transaction) -> Result<[u8; 32], PocketError> {
     Ok(out)
 }
 
-pub fn build_and_sign_transfer(
-    password: &str,
+fn build_unsigned_tx(
+    from: &str,
+    pubkey_hex: &str,
     req: TxBuildRequest,
     rpc: Option<String>,
     token: Option<String>,
-) -> Result<TxEnvelope, PocketError> {
-    let info = load_keystore(password)?;
+) -> Result<Transaction, PocketError> {
     let chain_id = req.chain_id.unwrap_or_else(|| "peace-testnet".into());
-    if !address_matches_chain(&info.address, &chain_id) {
+    if !address_matches_chain(from, &chain_id) {
         return Err(PocketError::Crypto("hrp/chain_id mismatch".into()));
     }
     let pool_path = req
         .pending_pool
         .clone()
         .or_else(|| std::env::var(ENV_PENDING_POOL).ok());
-    let ledger_nonce = fetch_balance(&info.address, rpc.clone(), token.clone())?.nonce;
+    let ledger_nonce = fetch_balance(from, rpc.clone(), token.clone())?.nonce;
     let chosen_nonce = match req.nonce {
         Some(n) => n,
         None => pool_path
             .as_deref()
-            .and_then(|p| pending_nonce_from_pool(p, &info.address))
+            .and_then(|p| pending_nonce_from_pool(p, from))
             .unwrap_or(ledger_nonce),
     };
     let kind = match req.kind {
@@ -802,16 +910,101 @@ pub fn build_and_sign_transfer(
         },
     };
 
-    let mut tx = Transaction {
-        from: info.address.clone(),
+    Ok(Transaction {
+        from: from.to_string(),
         nonce: chosen_nonce,
         kind,
         fee: req.fee as u128,
         timestamp: req.timestamp.unwrap_or_else(now_ts),
         chain_id: chain_id.clone(),
         signature: None,
-        pubkey_hex: Some(info.public_key_hex.clone()),
+        pubkey_hex: Some(pubkey_hex.to_string()),
+    })
+}
+
+fn envelope_from_signed_tx(tx: &Transaction) -> Result<TxEnvelope, PocketError> {
+    let txid = tx_id_bytes(tx)?;
+    let tx_val = serde_json::to_value(tx).map_err(|e| PocketError::Crypto(e.to_string()))?;
+    Ok(TxEnvelope {
+        tx: tx_val,
+        tx_id: hex::encode(txid),
+    })
+}
+
+fn run_external_signer(command: &str, msg: &[u8]) -> Result<Vec<u8>, PocketError> {
+    let mut cmd = if cfg!(windows) {
+        let mut inner = Command::new("cmd");
+        inner.arg("/C").arg(command);
+        inner
+    } else {
+        let mut inner = Command::new("sh");
+        inner.arg("-lc").arg(command);
+        inner
     };
+    cmd.env("POCKET_SIGN_BYTES_HEX", hex::encode(msg))
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::inherit());
+    let mut child = cmd
+        .spawn()
+        .map_err(|e| PocketError::Crypto(format!("external signer spawn failed: {e}")))?;
+    if let Some(mut stdin) = child.stdin.take() {
+        use std::io::Write as _;
+        stdin
+            .write_all(hex::encode(msg).as_bytes())
+            .map_err(|e| PocketError::Crypto(format!("external signer stdin failed: {e}")))?;
+    }
+    let output = child
+        .wait_with_output()
+        .map_err(|e| PocketError::Crypto(format!("external signer wait failed: {e}")))?;
+    if !output.status.success() {
+        return Err(PocketError::Crypto(format!(
+            "external signer exited with status {}",
+            output.status
+        )));
+    }
+    let sig_hex = String::from_utf8(output.stdout)
+        .map_err(|e| PocketError::Crypto(format!("external signer output was not utf8: {e}")))?;
+    hex::decode(sig_hex.trim())
+        .map_err(|e| PocketError::Crypto(format!("external signer returned invalid hex: {e}")))
+}
+
+fn verify_external_signer_identity(
+    chain_id: &str,
+    address: &str,
+    pubkey_hex: &str,
+) -> Result<VerifyingKey, PocketError> {
+    let pubkey_bytes =
+        hex::decode(pubkey_hex).map_err(|e| PocketError::Crypto(format!("invalid pubkey hex: {e}")))?;
+    let pubkey_arr: [u8; 32] = pubkey_bytes
+        .as_slice()
+        .try_into()
+        .map_err(|_| PocketError::Crypto("pubkey must be 32 bytes".into()))?;
+    let verifying =
+        VerifyingKey::from_bytes(&pubkey_arr).map_err(|e| PocketError::Crypto(e.to_string()))?;
+    let expected_addr = bech32_address(hrp_for_chain(chain_id)?, &verifying)?;
+    if expected_addr != address {
+        return Err(PocketError::Crypto(format!(
+            "external signer address mismatch ({expected_addr} != {address})"
+        )));
+    }
+    Ok(verifying)
+}
+
+pub fn build_and_sign_transfer(
+    password: &str,
+    req: TxBuildRequest,
+    rpc: Option<String>,
+    token: Option<String>,
+) -> Result<TxEnvelope, PocketError> {
+    let info = load_keystore(password)?;
+    let mut tx = build_unsigned_tx(
+        &info.address,
+        &info.public_key_hex,
+        req,
+        rpc,
+        token,
+    )?;
     let msg = tx_signing_bytes(&tx)?;
     let seed_bytes = Mnemonic::parse_in_normalized(Language::English, &info.mnemonic)
         .map_err(|e| PocketError::Mnemonic(e.to_string()))?
@@ -819,12 +1012,42 @@ pub fn build_and_sign_transfer(
     let sk = SigningKey::from_bytes(&seed_bytes[0..32].try_into().unwrap());
     let sig = sk.sign(&msg);
     tx.signature = Some(sig.to_bytes().to_vec());
-    let txid = tx_id_bytes(&tx)?;
-    let tx_val = serde_json::to_value(&tx).map_err(|e| PocketError::Crypto(e.to_string()))?;
-    Ok(TxEnvelope {
-        tx: tx_val,
-        tx_id: hex::encode(txid),
-    })
+    envelope_from_signed_tx(&tx)
+}
+
+pub fn build_and_sign_external(
+    req: TxBuildRequest,
+    rpc: Option<String>,
+    token: Option<String>,
+) -> Result<TxEnvelope, PocketError> {
+    let cfg = load_config().unwrap_or_default();
+    let command = cfg
+        .external_signer_command
+        .ok_or_else(|| PocketError::Crypto("external signer command not configured".into()))?;
+    let address = cfg
+        .external_signer_address
+        .ok_or_else(|| PocketError::Crypto("external signer address not configured".into()))?;
+    let pubkey_hex = cfg
+        .external_signer_pubkey_hex
+        .ok_or_else(|| PocketError::Crypto("external signer pubkey not configured".into()))?;
+    let chain_id = req
+        .chain_id
+        .clone()
+        .unwrap_or_else(|| "peace-testnet".into());
+    let verifying = verify_external_signer_identity(&chain_id, &address, &pubkey_hex)?;
+    let mut tx = build_unsigned_tx(&address, &pubkey_hex, req, rpc, token)?;
+    let msg = tx_signing_bytes(&tx)?;
+    let sig = run_external_signer(&command, &msg)?;
+    let sig_arr: [u8; 64] = sig
+        .as_slice()
+        .try_into()
+        .map_err(|_| PocketError::Crypto("external signer signature must be 64 bytes".into()))?;
+    let signature = ed25519_dalek::Signature::from_bytes(&sig_arr);
+    verifying
+        .verify(&msg, &signature)
+        .map_err(|e| PocketError::Crypto(format!("external signer verification failed: {e}")))?;
+    tx.signature = Some(sig);
+    envelope_from_signed_tx(&tx)
 }
 
 pub fn submit_tx(
@@ -944,5 +1167,25 @@ mod tests {
             "ac7888121ac4d8602f78f8513bebb41fc1d44324bb3314cadceca9015993e1b0",
             "tx_id must match Peace spec vector"
         );
+    }
+
+    #[test]
+    fn profile_payload_hides_attestation_for_payout_route() {
+        let tmp = tempfile::tempdir().unwrap();
+        std::env::set_var("HOME", tmp.path());
+        save_profile(&Profile {
+            payout_address: Some("tpc1payout".into()),
+            attestation_token: Some("secret-token".into()),
+        })
+        .unwrap();
+        let body = profile_payload(false).unwrap();
+        assert!(body.contains("tpc1payout"));
+        assert!(!body.contains("secret-token"));
+    }
+
+    #[test]
+    fn profile_auth_accepts_matching_bearer() {
+        let header = Header::from_bytes(&b"Authorization"[..], &b"Bearer token123"[..]).unwrap();
+        assert!(has_profile_auth(&[header], "token123"));
     }
 }

@@ -12,7 +12,7 @@ cargo tauri build
 ```
 Artifacts land in `gui/src-tauri/target/release/bundle/macos/` (`pocket-gui.app`, `.dmg` if enabled).
 
-Signing/notarization outline (not automated yet)
+Signing/notarization outline
 1) Set env:
    - `APPLE_ID`, `APPLE_TEAM_ID`, `APPLE_PASSWORD` (app-specific password) or use keychain.
 2) Provide certificate:
@@ -24,7 +24,8 @@ Signing/notarization outline (not automated yet)
 5) Staple:
    - `xcrun stapler staple path/to/pocket-gui.dmg`
 
-Release pipeline suggestion
-- GitHub Actions workflow `ci.yml` builds unsigned bundles on macOS and uploads artifacts.
-- If you set secrets `APPLE_ID`, `APPLE_TEAM_ID`, `APPLE_PASSWORD`, the workflow will notarize/staple the `.dmg` automatically. Otherwise it remains unsigned for manual testing.
+Release pipeline
+- GitHub Actions workflow `release.yml` publishes release artifacts on tags.
+- GitHub Actions workflow `ci.yml` continues to build/test on pushes and PRs.
+- If you set secrets `APPLE_ID`, `APPLE_TEAM_ID`, `APPLE_PASSWORD`, the macOS release workflow notarizes/staples the `.dmg` automatically. Otherwise it remains unsigned for manual testing.
 - Add an app icon at `gui/src-tauri/icons/icon.png` (512x512) to brand the bundle—currently a minimal placeholder is included.

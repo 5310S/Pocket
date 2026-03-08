@@ -21,7 +21,7 @@ Pocket Wallet Plan (macOS focus)
 
 4) Mining payout support for Weave
    [x] Select/store payout address and attestation token
-   [ ] Simple API/IPC for Weave to fetch payout address (beyond current config/profile files)
+   [x] Simple API/IPC for Weave to fetch payout address (beyond current config/profile files)
 
 5) UI/UX surface (macOS)
    [x] Tauri GUI scaffold (init/show/balance/head/difficulty)
@@ -32,8 +32,8 @@ Pocket Wallet Plan (macOS focus)
    [x] Error banners and validation on inputs
 
 6) Security & storage
-   [ ] Hardware keystore hook (future)
-   [ ] Document PBKDF/crypto params (Argon2id + AES-GCM)
+   [x] Hardware keystore hook via external signer command
+   [x] Document PBKDF/crypto params (Argon2id + AES-GCM)
 
 7) Config & env
    [x] Rate-limit/backoff for RPC (+ TLS strict by default; POCKET_TLS_INSECURE to override)
@@ -48,4 +48,4 @@ Pocket Wallet Plan (macOS focus)
 9) Packaging & deployment (macOS)
    [x] Tauri bundle for macOS (.app/.dmg) via CI artifact (unsigned)
    [x] App icon placeholder added (gui/src-tauri/icons/icon.png); signing/notarization plan doc
-   [ ] Release pipeline (publish artifacts + notarized build when creds provided)
+   [x] Release pipeline (publish artifacts + notarized build when creds provided)
