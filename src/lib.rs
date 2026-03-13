@@ -1,5 +1,6 @@
-use std::fs;
-use std::path::PathBuf;
+use std::fs::{self, OpenOptions};
+use std::io::Write;
+use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
 use aes_gcm::{
@@ -21,6 +22,7 @@ use strum::{Display, EnumString};
 use thiserror::Error;
 use tiny_http::{Header, Method, Response, Server, StatusCode};
 
+#[allow(dead_code)]
 mod p2p;
 
 #[derive(Debug, Error)]
@@ -46,6 +48,12 @@ pub struct KeyInfo {
     pub address: String,
 }
 
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+pub struct PublicKeyInfo {
+    pub public_key_hex: String,
+    pub address: String,
+}
+
 #[derive(Serialize, Deserialize)]
 struct Keystore {
     cipher: String,
@@ -61,8 +69,6 @@ const PROFILE_PATH: &str = "~/.pocket/profile.json";
 const ENV_TLS_INSECURE: &str = "POCKET_TLS_INSECURE";
 const ENV_PENDING_POOL: &str = "PENDING_POOL_PATH";
 const ENV_PROFILE_TOKEN: &str = "POCKET_PROFILE_TOKEN";
-const DEFAULT_P2P_BOOTSTRAP: &[&str] = &["93.127.216.241:3000"];
-
 #[derive(Serialize, Deserialize, Clone, Default)]
 pub struct Config {
     pub rpc_base: Option<String>,
@@ -205,15 +211,17 @@ pub(crate) struct Transaction {
     pubkey_hex: Option<String>,
 }
 
-fn address_matches_chain(addr: &str, chain_id: &str) -> bool {
-    let hrp = if chain_id.starts_with("peace-mainnet") {
-        "pc"
-    } else if chain_id.starts_with("peace-testnet") {
-        "tpc"
-    } else {
-        ""
-    };
-    addr.starts_with(hrp)
+impl KeyInfo {
+    fn public_view(&self) -> PublicKeyInfo {
+        PublicKeyInfo {
+            public_key_hex: self.public_key_hex.clone(),
+            address: self.address.clone(),
+        }
+    }
+}
+
+fn address_matches_chain(addr: &str, chain_id: &str) -> Result<bool, PocketError> {
+    Ok(addr.starts_with(hrp_for_chain(chain_id)?))
 }
 
 fn hrp_valid(hrp: &str) -> bool {
@@ -348,13 +356,40 @@ fn profile_path() -> PathBuf {
     expand_path(PROFILE_PATH)
 }
 
-pub fn save_config(cfg: &Config) -> Result<(), PocketError> {
-    let path = config_path();
+fn write_private_file(path: &Path, data: &[u8]) -> Result<(), PocketError> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent).map_err(|e| PocketError::Io(e.to_string()))?;
     }
+    let mut opts = OpenOptions::new();
+    opts.create(true).write(true).truncate(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
+
+        opts.mode(0o600);
+        let mut file = opts
+            .open(path)
+            .map_err(|e| PocketError::Io(e.to_string()))?;
+        file.write_all(data)
+            .map_err(|e| PocketError::Io(e.to_string()))?;
+        fs::set_permissions(path, fs::Permissions::from_mode(0o600))
+            .map_err(|e| PocketError::Io(e.to_string()))?;
+    }
+    #[cfg(not(unix))]
+    {
+        let mut file = opts
+            .open(path)
+            .map_err(|e| PocketError::Io(e.to_string()))?;
+        file.write_all(data)
+            .map_err(|e| PocketError::Io(e.to_string()))?;
+    }
+    Ok(())
+}
+
+pub fn save_config(cfg: &Config) -> Result<(), PocketError> {
+    let path = config_path();
     let data = serde_json::to_vec_pretty(cfg).map_err(|e| PocketError::Io(e.to_string()))?;
-    fs::write(&path, data).map_err(|e| PocketError::Io(e.to_string()))
+    write_private_file(&path, &data)
 }
 
 pub fn load_config() -> Result<Config, PocketError> {
@@ -383,19 +418,13 @@ fn p2p_bootstrap(cfg: &Config) -> Vec<String> {
     if !cfg.p2p_bootstrap.is_empty() {
         return cfg.p2p_bootstrap.clone();
     }
-    DEFAULT_P2P_BOOTSTRAP
-        .iter()
-        .map(|s| s.to_string())
-        .collect()
+    Vec::new()
 }
 
 pub fn save_profile(profile: &Profile) -> Result<(), PocketError> {
     let path = profile_path();
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent).map_err(|e| PocketError::Io(e.to_string()))?;
-    }
     let data = serde_json::to_vec_pretty(profile).map_err(|e| PocketError::Io(e.to_string()))?;
-    fs::write(&path, data).map_err(|e| PocketError::Io(e.to_string()))
+    write_private_file(&path, &data)
 }
 
 pub fn load_profile() -> Result<Profile, PocketError> {
@@ -449,16 +478,15 @@ fn bind_is_loopback(bind: &str) -> bool {
         .unwrap_or(false)
 }
 
-pub fn serve_profile_http(
-    bind: &str,
-    token: Option<String>,
-    once: bool,
-) -> Result<String, PocketError> {
-    let required_token = token
+fn resolve_profile_token(token: Option<String>) -> String {
+    token
         .or_else(|| std::env::var(ENV_PROFILE_TOKEN).ok())
         .unwrap_or_default()
         .trim()
-        .to_string();
+        .to_string()
+}
+
+fn profile_server(bind: &str, required_token: &str) -> Result<(Server, String), PocketError> {
     if required_token.is_empty() && !bind_is_loopback(bind) {
         return Err(PocketError::Io(
             "refusing non-loopback profile bind without a profile bearer token".into(),
@@ -470,8 +498,14 @@ pub fn serve_profile_http(
         .to_ip()
         .map(|addr| addr.to_string())
         .unwrap_or_else(|| bind.to_string());
-    eprintln!("Pocket profile API listening on http://{actual_bind}");
+    Ok((server, actual_bind))
+}
 
+fn serve_profile_requests(
+    server: Server,
+    required_token: String,
+    once: bool,
+) -> Result<(), PocketError> {
     loop {
         let request = server.recv().map_err(|e| PocketError::Io(e.to_string()))?;
         let url = request.url().split('?').next().unwrap_or("/");
@@ -521,6 +555,30 @@ pub fn serve_profile_http(
         }
     }
 
+    Ok(())
+}
+
+pub fn spawn_profile_http(bind: &str, token: Option<String>) -> Result<String, PocketError> {
+    let required_token = resolve_profile_token(token);
+    let (server, actual_bind) = profile_server(bind, &required_token)?;
+    eprintln!("Pocket profile API listening on http://{actual_bind}");
+    std::thread::spawn(move || {
+        if let Err(e) = serve_profile_requests(server, required_token, false) {
+            eprintln!("Pocket profile API stopped: {e}");
+        }
+    });
+    Ok(actual_bind)
+}
+
+pub fn serve_profile_http(
+    bind: &str,
+    token: Option<String>,
+    once: bool,
+) -> Result<String, PocketError> {
+    let required_token = resolve_profile_token(token);
+    let (server, actual_bind) = profile_server(bind, &required_token)?;
+    eprintln!("Pocket profile API listening on http://{actual_bind}");
+    serve_profile_requests(server, required_token, once)?;
     Ok(actual_bind)
 }
 
@@ -576,20 +634,21 @@ pub fn init_keystore(password: &str, hrp: &str) -> Result<KeyInfo, PocketError> 
     let info = gen_key(24, hrp)?;
     let ks = encrypt_mnemonic(&info.mnemonic, password, hrp)?;
     let path = keystore_path();
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent).map_err(|e| PocketError::Io(e.to_string()))?;
-    }
     let data = serde_json::to_vec_pretty(&ks).map_err(|e| PocketError::Io(e.to_string()))?;
-    fs::write(&path, data).map_err(|e| PocketError::Io(e.to_string()))?;
+    write_private_file(&path, &data)?;
     Ok(info)
 }
 
-pub fn load_keystore(password: &str) -> Result<KeyInfo, PocketError> {
+fn load_keystore_secret(password: &str) -> Result<KeyInfo, PocketError> {
     let path = keystore_path();
     let data = fs::read_to_string(&path).map_err(|e| PocketError::Io(e.to_string()))?;
     let ks: Keystore = serde_json::from_str(&data).map_err(|e| PocketError::Io(e.to_string()))?;
     let mnemonic = decrypt_mnemonic(&ks, password)?;
     addr_from_mnemonic(&mnemonic, &ks.hrp)
+}
+
+pub fn load_keystore(password: &str) -> Result<PublicKeyInfo, PocketError> {
+    load_keystore_secret(password).map(|info| info.public_view())
 }
 
 pub fn export_mnemonic(password: &str) -> Result<String, PocketError> {
@@ -603,11 +662,8 @@ pub fn import_mnemonic(password: &str, mnemonic: &str, hrp: &str) -> Result<KeyI
     let _ = addr_from_mnemonic(mnemonic, hrp)?;
     let ks = encrypt_mnemonic(mnemonic, password, hrp)?;
     let path = keystore_path();
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent).map_err(|e| PocketError::Io(e.to_string()))?;
-    }
     let data = serde_json::to_vec_pretty(&ks).map_err(|e| PocketError::Io(e.to_string()))?;
-    fs::write(&path, data).map_err(|e| PocketError::Io(e.to_string()))?;
+    write_private_file(&path, &data)?;
     addr_from_mnemonic(mnemonic, hrp)
 }
 
@@ -618,7 +674,7 @@ pub fn change_password(old_password: &str, new_password: &str) -> Result<(), Poc
     let mnemonic = decrypt_mnemonic(&ks, old_password)?;
     let new_ks = encrypt_mnemonic(&mnemonic, new_password, &ks.hrp)?;
     let data = serde_json::to_vec_pretty(&new_ks).map_err(|e| PocketError::Io(e.to_string()))?;
-    fs::write(&path, data).map_err(|e| PocketError::Io(e.to_string()))
+    write_private_file(&path, &data)
 }
 
 pub fn balance(
@@ -637,17 +693,6 @@ pub fn fetch_balance(
     token: Option<String>,
 ) -> Result<BalanceInfo, PocketError> {
     let cfg = load_config().unwrap_or_default();
-    let peers = p2p_bootstrap(&cfg);
-    if !peers.is_empty() {
-        match p2p::fetch_balance_p2p(addr, &peers) {
-            Ok(info) => return Ok(info),
-            Err(e) => {
-                if rpc.is_none() && cfg.rpc_base.is_none() {
-                    return Err(e);
-                }
-            }
-        }
-    }
     fetch_balance_rpc(addr, rpc, token, &cfg)
 }
 
@@ -746,11 +791,17 @@ fn fetch_balance_rpc(
         .map_err(|e| PocketError::Rpc(e.to_string()))?;
     let proof: AccountProofResponse =
         serde_json::from_str(&proof_txt).map_err(|e| PocketError::Rpc(e.to_string()))?;
+    if proof.addr != addr {
+        return Err(PocketError::Proof("proof addr mismatch".into()));
+    }
     if proof.root != state_root_hex {
         return Err(PocketError::Proof("state_root mismatch".into()));
     }
     if !verify_account_proof(&proof) {
         return Err(PocketError::Proof("invalid account proof".into()));
+    }
+    if proof.account.balance > u64::MAX as u128 {
+        return Err(PocketError::Proof("balance overflow".into()));
     }
     Ok(BalanceInfo {
         addr: proof.addr,
@@ -900,7 +951,7 @@ fn build_unsigned_tx(
     token: Option<String>,
 ) -> Result<Transaction, PocketError> {
     let chain_id = req.chain_id.unwrap_or_else(|| "peace-testnet".into());
-    if !address_matches_chain(from, &chain_id) {
+    if !address_matches_chain(from, &chain_id)? {
         return Err(PocketError::Crypto("hrp/chain_id mismatch".into()));
     }
     let pool_path = req
@@ -1027,7 +1078,7 @@ pub fn build_and_sign_transfer(
     rpc: Option<String>,
     token: Option<String>,
 ) -> Result<TxEnvelope, PocketError> {
-    let info = load_keystore(password)?;
+    let info = load_keystore_secret(password)?;
     let mut tx = build_unsigned_tx(&info.address, &info.public_key_hex, req, rpc, token)?;
     let msg = tx_signing_bytes(&tx)?;
     let seed_bytes = Mnemonic::parse_in_normalized(Language::English, &info.mnemonic)
@@ -1080,28 +1131,8 @@ pub fn submit_tx(
     signed: &serde_json::Value,
 ) -> Result<String, PocketError> {
     let cfg = load_config().unwrap_or_default();
-
-    let peers = p2p_bootstrap(&cfg);
-    if !peers.is_empty() {
-        if let Ok(tx) = serde_json::from_value::<Transaction>(signed.clone()) {
-            let chain_id = if tx.chain_id.is_empty() {
-                "peace-testnet".to_string()
-            } else {
-                tx.chain_id.clone()
-            };
-            match p2p::submit_tx_p2p(&tx, &chain_id, &peers) {
-                Ok(res) => return Ok(res),
-                Err(e) => {
-                    // Fall back to HTTP if configured.
-                    if rpc.is_none() && cfg.rpc_base.is_none() {
-                        return Err(e);
-                    }
-                }
-            }
-        }
-    }
-
     let rpc_base = rpc
+        .clone()
         .or(cfg.rpc_base.clone())
         .unwrap_or_else(|| "https://127.0.0.1:8645".to_string());
     let client = rpc_client()?;
@@ -1109,16 +1140,35 @@ pub fn submit_tx(
         .post(format!("{}/weave/chain/tx", rpc_base.trim_end_matches('/')))
         .json(&serde_json::json!({"tx": signed}));
     if let Some(t) = token
-        .or(cfg.token)
+        .clone()
+        .or(cfg.token.clone())
         .or_else(|| std::env::var("LANTERN_HTTP_TOKEN").ok())
     {
         reqb = reqb.bearer_auth(t);
     }
-    let resp = reqb.send().map_err(|e| PocketError::Rpc(e.to_string()))?;
-    if !resp.status().is_success() {
-        return Err(PocketError::Rpc(format!("http {}", resp.status())));
+    match reqb.send() {
+        Ok(resp) => {
+            if !resp.status().is_success() {
+                return Err(PocketError::Rpc(format!("http {}", resp.status())));
+            }
+            resp.text().map_err(|e| PocketError::Rpc(e.to_string()))
+        }
+        Err(http_err) => {
+            let peers = p2p_bootstrap(&cfg);
+            if peers.is_empty() {
+                return Err(PocketError::Rpc(http_err.to_string()));
+            }
+            if let Ok(tx) = serde_json::from_value::<Transaction>(signed.clone()) {
+                let chain_id = if tx.chain_id.is_empty() {
+                    "peace-testnet".to_string()
+                } else {
+                    tx.chain_id.clone()
+                };
+                return p2p::submit_tx_p2p(&tx, &chain_id, &peers);
+            }
+            Err(PocketError::Rpc(http_err.to_string()))
+        }
     }
-    resp.text().map_err(|e| PocketError::Rpc(e.to_string()))
 }
 
 fn now_ts() -> u64 {
@@ -1272,6 +1322,81 @@ mod tests {
     }
 
     #[test]
+    fn load_keystore_hides_mnemonic_in_public_view() {
+        let _guard = env_guard();
+        let tmp = tempfile::tempdir().unwrap();
+        std::env::set_var("HOME", tmp.path());
+        let created = init_keystore("pw", "tpc").unwrap();
+        let loaded = load_keystore("pw").unwrap();
+        let json = serde_json::to_string(&loaded).unwrap();
+
+        assert_eq!(loaded.address, created.address);
+        assert_eq!(loaded.public_key_hex, created.public_key_hex);
+        assert!(!json.contains("mnemonic"));
+        assert!(!json.contains(&created.mnemonic));
+    }
+
+    #[test]
+    fn build_unsigned_tx_rejects_unknown_chain_id() {
+        let _guard = env_guard();
+        let err = build_unsigned_tx(
+            "tpc1wvt60fl2y8cvzfwdf6fvdfhf9qavzn63jpdzqsy7xjvvgvzgthxs9gmanq",
+            "7317a7a7ea21f0c125cd4e92c6a6e9283ac14f51905a20409e3498c430485dcd",
+            TxBuildRequest {
+                kind: BuildKind::Transfer {
+                    to: "tpc1k3avtp53c5r53q8ny295n7806l23t02zcn75cqaf6jmxe4kvxmaqudz4xe".into(),
+                    amount: 7,
+                },
+                fee: 1,
+                nonce: Some(1),
+                timestamp: Some(1700000100),
+                chain_id: Some("peace-devnet".into()),
+                memo: None,
+                pending_pool: None,
+            },
+            None,
+            None,
+        )
+        .unwrap_err();
+
+        assert!(err.to_string().contains("unsupported chain_id"));
+    }
+
+    #[test]
+    fn p2p_bootstrap_requires_explicit_opt_in() {
+        let _guard = env_guard();
+        std::env::remove_var("POCKET_P2P_BOOTSTRAP");
+        assert!(p2p_bootstrap(&Config::default()).is_empty());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn sensitive_files_are_written_with_user_only_permissions() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let _guard = env_guard();
+        let tmp = tempfile::tempdir().unwrap();
+        std::env::set_var("HOME", tmp.path());
+
+        save_config(&Config {
+            token: Some("secret".into()),
+            ..Config::default()
+        })
+        .unwrap();
+        save_profile(&Profile {
+            payout_address: Some("tpc1payout".into()),
+            attestation_token: Some("secret-token".into()),
+        })
+        .unwrap();
+        init_keystore("pw", "tpc").unwrap();
+
+        for path in [config_path(), profile_path(), keystore_path()] {
+            let mode = fs::metadata(path).unwrap().permissions().mode() & 0o777;
+            assert_eq!(mode, 0o600);
+        }
+    }
+
+    #[test]
     fn profile_auth_accepts_matching_bearer() {
         let header = Header::from_bytes(&b"Authorization"[..], &b"Bearer token123"[..]).unwrap();
         assert!(has_profile_auth(&[header], "token123"));
@@ -1321,5 +1446,14 @@ mod tests {
         assert!(resp.starts_with("HTTP/1.1 200"));
         assert!(resp.contains("secret-token"));
         handle.join().unwrap().unwrap();
+    }
+
+    #[test]
+    fn spawn_profile_http_serves_health() {
+        let _guard = env_guard();
+        let bind = spawn_profile_http("127.0.0.1:0", None).unwrap();
+        let resp = http_get(&bind, "/health", None);
+        assert!(resp.starts_with("HTTP/1.1 200"));
+        assert!(resp.contains("{\"status\":\"ok\"}"));
     }
 }

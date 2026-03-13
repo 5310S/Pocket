@@ -1,7 +1,7 @@
 {
   "productName": "Pocket",
   "version": "0.1.2",
-  "identifier": "com.pocket.app",
+  "identifier": "com.5310s.pocket",
   "build": {
     "frontendDist": "../dist",
     "beforeBuildCommand": "",
@@ -23,5 +23,12 @@
     "security": {
       "csp": null
     }
+  },
+  "bundle": {
+    "active": true,
+    "icon": [
+      "icons/icon.png",
+      "icons/icon.ico"
+    ]
   }
 }

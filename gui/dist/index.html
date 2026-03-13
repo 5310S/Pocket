@@ -381,7 +381,7 @@
     </div>
   </div>
   <header>
-    <h1>Pocket Wallet v0.1.2 (macOS demo)</h1>
+    <h1>Pocket Wallet v0.1.2</h1>
     <div class="status"><div class="dot" id="dot"></div><span id="status">Ready</span></div>
   </header>
   <main>
@@ -454,7 +454,9 @@
       </div>
       <div class="row">
         <button id="send-btn">Sign & Submit</button>
+        <button id="send-external-btn" class="btn-ghost">External Sign & Submit</button>
       </div>
+      <div class="muted">External send uses the configured signer command and does not require the local keystore password.</div>
     </section>
     <section>
       <h3>Import / Export</h3>
@@ -468,13 +470,37 @@
       </div>
     </section>
     <section>
+      <h3>Offline Tools</h3>
+      <div class="row" style="flex-wrap:wrap; gap:8px;">
+        <select id="keygen-words" style="width:120px;">
+          <option value="24">24 words</option>
+          <option value="12">12 words</option>
+        </select>
+        <input id="keygen-hrp" placeholder="HRP (pc/tpc)" value="tpc" style="width:120px;">
+        <button id="keygen-btn">Generate Mnemonic</button>
+      </div>
+      <div class="muted">Generates a new mnemonic and address without writing to the local keystore.</div>
+      <div class="row" style="flex-wrap:wrap; gap:8px; margin-top:8px;">
+        <input id="addr-mnemonic" placeholder="Mnemonic to derive offline" style="flex:1; min-width:320px;">
+        <input id="addr-hrp" placeholder="HRP (pc/tpc)" value="tpc" style="width:120px;">
+        <button id="addr-btn" class="btn-ghost">Derive Address</button>
+      </div>
+    </section>
+    <section>
       <h3>Config & Payout</h3>
       <div class="row" style="flex-wrap:wrap; gap:8px;">
         <input id="rpc" placeholder="RPC (default https://127.0.0.1:8645)" style="flex:1; min-width:240px;">
         <input id="token" placeholder="Bearer token (optional)" style="flex:1; min-width:200px;">
       </div>
       <div class="row" style="flex-wrap:wrap; gap:8px; margin-top:8px;">
-        <input id="p2p-bootstrap" placeholder="P2P bootstrap (optional, auto if blank)" style="flex:1; min-width:240px;">
+        <input id="p2p-bootstrap" placeholder="P2P bootstrap peers (optional, disabled if blank)" style="flex:1; min-width:240px;">
+      </div>
+      <div class="row" style="flex-wrap:wrap; gap:8px; margin-top:8px;">
+        <input id="ext-command" placeholder="External signer command" style="flex:1; min-width:320px;">
+      </div>
+      <div class="row" style="flex-wrap:wrap; gap:8px; margin-top:8px;">
+        <input id="ext-address" placeholder="External signer address" style="flex:1; min-width:240px;">
+        <input id="ext-pubkey" placeholder="External signer pubkey hex" style="flex:1; min-width:240px;">
       </div>
       <div class="row" style="flex-wrap:wrap; gap:8px; margin-top:8px;">
         <input id="payout" placeholder="Payout address (pc/tpc)" style="flex:1; min-width:240px;">
@@ -482,10 +508,25 @@
       </div>
       <div class="row">
         <button id="save-config">Save Config</button>
+        <button id="save-external-signer">Save External Signer</button>
+        <button id="clear-external-signer" class="btn-ghost">Clear External Signer</button>
         <button id="show-config">Show Config</button>
         <button id="save-profile">Save Profile</button>
         <button id="show-profile">Show Profile</button>
       </div>
+      <div class="muted">External signer config enables signing through a hardware wallet, HSM, or wrapper command.</div>
+    </section>
+    <section>
+      <h3>Profile API</h3>
+      <div class="row" style="flex-wrap:wrap; gap:8px;">
+        <input id="profile-bind" placeholder="Bind address" value="127.0.0.1:9467" style="flex:1; min-width:240px;">
+        <input id="profile-token" placeholder="Profile bearer token (optional)" style="flex:1; min-width:220px;">
+      </div>
+      <div class="row">
+        <button id="serve-profile">Start Server</button>
+        <button id="serve-profile-once" class="btn-ghost">Serve Once</button>
+      </div>
+      <div class="muted">Serves local `/health`, `/payout`, and `/profile` routes for other tools. Background mode runs until the app exits.</div>
     </section>
     <section>
       <h3>Output</h3>
@@ -644,8 +685,7 @@
     kindSel.onchange = refreshKindUi;
     refreshKindUi();
 
-    document.getElementById('send-btn').onclick = () => {
-      if (!requireUnlock()) return;
+    function collectSendArgs() {
       const password = document.getElementById('password').value;
       const kind = kindSel.value;
       const to = document.getElementById('send-to').value || null;
@@ -657,13 +697,15 @@
       const nonce = document.getElementById('send-nonce').value;
       const timestamp = document.getElementById('send-ts').value;
       const chainId = document.getElementById('send-chain').value || null;
+      const rpc = document.getElementById('rpc').value || null;
+      const token = document.getElementById('token').value || null;
       if (kind === 'transfer' && (!to || !amount)) { showError('Transfer needs destination and amount'); return; }
       if (kind === 'stake' && (!payout || !amount)) { showError('Stake needs payout address and amount'); return; }
       if (kind === 'unbond' && !amount) { showError('Unbond needs amount'); return; }
       const hrp = hrpForChain(chainId);
       if (kind === 'transfer' && to && !isBechForChain(to, chainId)) { showError('Destination must match chain HRP ' + hrp); return; }
       if ((kind === 'stake' || kind === 'update-validator') && payout && !isBechForChain(payout, chainId)) { showError('Payout must match chain HRP ' + hrp); return; }
-      call('cmd_send', {
+      return {
         password,
         kind,
         to,
@@ -675,9 +717,22 @@
         timestamp: timestamp ? Number(timestamp) : null,
         chain_id: chainId,
         pending_pool: null,
-        rpc: null,
-        token: null,
-      });
+        rpc,
+        token,
+      };
+    }
+
+    document.getElementById('send-btn').onclick = () => {
+      if (!requireUnlock()) return;
+      const args = collectSendArgs();
+      if (!args) return;
+      call('cmd_send', args);
+    };
+    document.getElementById('send-external-btn').onclick = () => {
+      const args = collectSendArgs();
+      if (!args) return;
+      delete args.password;
+      call('cmd_send_external', args);
     };
     document.getElementById('export').onclick = () => {
       if (!requireUnlock()) return;
@@ -690,19 +745,25 @@
       const hrp = document.getElementById('import-hrp').value || 'tpc';
       call('cmd_import', { password, mnemonic, hrp });
     };
+    document.getElementById('keygen-btn').onclick = () => {
+      const words = Number(document.getElementById('keygen-words').value || '24');
+      const hrp = document.getElementById('keygen-hrp').value || 'tpc';
+      call('cmd_keygen', { words, hrp });
+    };
+    document.getElementById('addr-btn').onclick = () => {
+      const mnemonic = document.getElementById('addr-mnemonic').value;
+      const hrp = document.getElementById('addr-hrp').value || 'tpc';
+      call('cmd_addr', { mnemonic, hrp });
+    };
     function persistSettings() {
       localStorage.setItem('pocket_rpc', document.getElementById('rpc').value || '');
-      localStorage.setItem('pocket_token', document.getElementById('token').value || '');
       localStorage.setItem('pocket_p2p', document.getElementById('p2p-bootstrap').value || '');
       localStorage.setItem('pocket_payout', document.getElementById('payout').value || '');
-      localStorage.setItem('pocket_att', document.getElementById('att').value || '');
     }
     function loadSettings() {
       document.getElementById('rpc').value = localStorage.getItem('pocket_rpc') || '';
-      document.getElementById('token').value = localStorage.getItem('pocket_token') || '';
       document.getElementById('p2p-bootstrap').value = localStorage.getItem('pocket_p2p') || '';
       document.getElementById('payout').value = localStorage.getItem('pocket_payout') || '';
-      document.getElementById('att').value = localStorage.getItem('pocket_att') || '';
       currentRpc = document.getElementById('rpc').value || null;
     }
     document.getElementById('save-config').onclick = () => {
@@ -713,6 +774,18 @@
       currentRpc = rpc;
       persistSettings();
       call('cmd_set_config', { rpc, token, p2p_bootstrap });
+    };
+    document.getElementById('save-external-signer').onclick = () => {
+      const command = document.getElementById('ext-command').value || null;
+      const address = document.getElementById('ext-address').value || null;
+      const pubkey_hex = document.getElementById('ext-pubkey').value || null;
+      call('cmd_set_external_signer', { command, address, pubkey_hex, clear: false });
+    };
+    document.getElementById('clear-external-signer').onclick = () => {
+      document.getElementById('ext-command').value = '';
+      document.getElementById('ext-address').value = '';
+      document.getElementById('ext-pubkey').value = '';
+      call('cmd_set_external_signer', { command: null, address: null, pubkey_hex: null, clear: true });
     };
     document.getElementById('show-config').onclick = () => {
       call('cmd_show_config', {}).then(() => setDot(true)).catch(() => setDot(false));
@@ -726,6 +799,16 @@
     document.getElementById('show-profile').onclick = () => {
       call('cmd_show_profile', {});
     };
+    document.getElementById('serve-profile').onclick = () => {
+      const bind = document.getElementById('profile-bind').value || '127.0.0.1:9467';
+      const token = document.getElementById('profile-token').value || null;
+      call('cmd_serve_profile', { bind, token, once: false });
+    };
+    document.getElementById('serve-profile-once').onclick = () => {
+      const bind = document.getElementById('profile-bind').value || '127.0.0.1:9467';
+      const token = document.getElementById('profile-token').value || null;
+      call('cmd_serve_profile', { bind, token, once: true });
+    };
 
     async function hydrateFromBackend() {
       try {
@@ -736,6 +819,9 @@
         if (obj.p2p_bootstrap && Array.isArray(obj.p2p_bootstrap)) {
           document.getElementById('p2p-bootstrap').value = obj.p2p_bootstrap.join(', ');
         }
+        if (obj.external_signer_command) document.getElementById('ext-command').value = obj.external_signer_command;
+        if (obj.external_signer_address) document.getElementById('ext-address').value = obj.external_signer_address;
+        if (obj.external_signer_pubkey_hex) document.getElementById('ext-pubkey').value = obj.external_signer_pubkey_hex;
       } catch (e) { /* ignore */ }
       try {
         const prof = await invoke('cmd_get_payout', {});

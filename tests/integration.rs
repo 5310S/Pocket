@@ -1,4 +1,7 @@
-use pocket_lib::{build_and_sign_transfer, init_keystore, AccountState, BuildKind, TxBuildRequest};
+use pocket_lib::{
+    build_and_sign_transfer, fetch_balance, gen_key, init_keystore, AccountState, BuildKind,
+    TxBuildRequest,
+};
 use sha2::{Digest, Sha256};
 use std::sync::{Mutex, OnceLock};
 use std::time::Duration;
@@ -43,13 +46,13 @@ fn account_leaf_hash(addr: &str, account: &AccountState) -> [u8; 32] {
     state_leaf_hash(&format!("account:{addr}"), &bytes)
 }
 
-fn start_mock_rpc(wallet_addr: String, nonce: u64) -> String {
+fn start_mock_rpc(proof_addr: String, nonce: u64) -> String {
     let account = AccountState {
         balance: 123,
         nonce,
         stakes: Vec::new(),
     };
-    let root = account_leaf_hash(&wallet_addr, &account);
+    let root = account_leaf_hash(&proof_addr, &account);
     let root_hex = hex::encode(root);
     let state_root_json: Vec<u64> = root.iter().map(|b| *b as u64).collect();
 
@@ -83,7 +86,7 @@ fn start_mock_rpc(wallet_addr: String, nonce: u64) -> String {
                 (
                     200,
                     serde_json::json!({
-                        "addr": wallet_addr.clone(),
+                        "addr": proof_addr.clone(),
                         "account": account.clone(),
                         "proof": [],
                         "root": root_hex.clone(),
@@ -186,4 +189,15 @@ fn mock_rpc_round_trip() {
 
     // Allow background server thread to finish.
     thread::sleep(Duration::from_millis(50));
+}
+
+#[test]
+fn rpc_balance_rejects_mismatched_proof_addr() {
+    let _g = env_guard();
+    let wallet = gen_key(12, "tpc").expect("wallet");
+    let other = gen_key(12, "tpc").expect("other wallet");
+    let rpc = start_mock_rpc(other.address, 0);
+
+    let err = fetch_balance(&wallet.address, Some(rpc), None).expect_err("mismatched proof");
+    assert!(err.to_string().contains("proof addr mismatch"));
 }
