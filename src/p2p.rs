@@ -11,7 +11,7 @@ use serde::{Deserialize, Serialize};
 use crate::{AccountState, BalanceInfo, PocketError, Transaction};
 
 const PROTOCOL_VERSION: u32 = 2;
-const DEFAULT_P2P_PORT: u16 = 3737;
+const DEFAULT_P2P_PORT: u16 = 3000;
 const READ_TIMEOUT_SECS: u64 = 5;
 const MAX_FRAME_BYTES: usize = 512 * 1024;
 const FEATURE_MINING_ATTESTATION: &str = "mining-attestation";

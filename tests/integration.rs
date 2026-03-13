@@ -40,7 +40,7 @@ fn account_leaf_hash(addr: &str, account: &AccountState) -> [u8; 32] {
     }
     let leaf = AccountLeaf { addr, account };
     let bytes = serde_json::to_vec(&leaf).expect("serialize leaf");
-    state_leaf_hash(&format!("account:{}", addr), &bytes)
+    state_leaf_hash(&format!("account:{addr}"), &bytes)
 }
 
 fn start_mock_rpc(wallet_addr: String, nonce: u64) -> String {

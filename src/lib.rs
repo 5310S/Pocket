@@ -61,7 +61,7 @@ const PROFILE_PATH: &str = "~/.pocket/profile.json";
 const ENV_TLS_INSECURE: &str = "POCKET_TLS_INSECURE";
 const ENV_PENDING_POOL: &str = "PENDING_POOL_PATH";
 const ENV_PROFILE_TOKEN: &str = "POCKET_PROFILE_TOKEN";
-const DEFAULT_P2P_BOOTSTRAP: &[&str] = &["93.127.216.241:3737"];
+const DEFAULT_P2P_BOOTSTRAP: &[&str] = &["93.127.216.241:3000"];
 
 #[derive(Serialize, Deserialize, Clone, Default)]
 pub struct Config {
@@ -263,7 +263,7 @@ fn account_leaf_hash(addr: &str, account: &AccountState) -> Result<[u8; 32], Poc
     }
     let leaf = AccountLeaf { addr, account };
     let bytes = serde_json::to_vec(&leaf).map_err(|e| PocketError::Proof(e.to_string()))?;
-    Ok(state_leaf_hash(&format!("account:{}", addr), &bytes))
+    Ok(state_leaf_hash(&format!("account:{addr}"), &bytes))
 }
 
 fn verify_account_proof(proof: &AccountProofResponse) -> bool {
@@ -422,8 +422,8 @@ fn profile_payload(include_attestation: bool) -> Result<String, PocketError> {
 }
 
 fn has_profile_auth(headers: &[Header], required_token: &str) -> bool {
-    if required_token.is_empty() {
-        return true;
+    if required_token.trim().is_empty() {
+        return false;
     }
     headers.iter().any(|header| {
         header.field.equiv("Authorization")
@@ -431,20 +431,45 @@ fn has_profile_auth(headers: &[Header], required_token: &str) -> bool {
     })
 }
 
+fn bind_is_loopback(bind: &str) -> bool {
+    let host = if let Some(rest) = bind.strip_prefix('[') {
+        if let Some(end) = rest.find(']') {
+            &rest[..end]
+        } else {
+            bind
+        }
+    } else {
+        bind.rsplit_once(':').map(|(host, _)| host).unwrap_or(bind)
+    };
+    if host.eq_ignore_ascii_case("localhost") {
+        return true;
+    }
+    host.parse::<std::net::IpAddr>()
+        .map(|ip| ip.is_loopback())
+        .unwrap_or(false)
+}
+
 pub fn serve_profile_http(
     bind: &str,
     token: Option<String>,
     once: bool,
 ) -> Result<String, PocketError> {
+    let required_token = token
+        .or_else(|| std::env::var(ENV_PROFILE_TOKEN).ok())
+        .unwrap_or_default()
+        .trim()
+        .to_string();
+    if required_token.is_empty() && !bind_is_loopback(bind) {
+        return Err(PocketError::Io(
+            "refusing non-loopback profile bind without a profile bearer token".into(),
+        ));
+    }
     let server = Server::http(bind).map_err(|e| PocketError::Io(e.to_string()))?;
     let actual_bind = server
         .server_addr()
         .to_ip()
         .map(|addr| addr.to_string())
         .unwrap_or_else(|| bind.to_string());
-    let required_token = token
-        .or_else(|| std::env::var(ENV_PROFILE_TOKEN).ok())
-        .unwrap_or_default();
     eprintln!("Pocket profile API listening on http://{actual_bind}");
 
     loop {
@@ -474,7 +499,13 @@ pub fn serve_profile_http(
                 send_json(request, 200, profile_payload(false)?)?;
             }
             (Method::Get, "/profile") => {
-                if !has_profile_auth(request.headers(), &required_token) {
+                if required_token.is_empty() {
+                    send_json(
+                        request,
+                        403,
+                        "{\"error\":\"profile_token_required\"}".to_string(),
+                    )?;
+                } else if !has_profile_auth(request.headers(), &required_token) {
                     send_json(request, 401, "{\"error\":\"unauthorized\"}".to_string())?;
                 } else {
                     send_json(request, 200, profile_payload(true)?)?;
@@ -876,13 +907,12 @@ fn build_unsigned_tx(
         .pending_pool
         .clone()
         .or_else(|| std::env::var(ENV_PENDING_POOL).ok());
-    let ledger_nonce = fetch_balance(from, rpc.clone(), token.clone())?.nonce;
     let chosen_nonce = match req.nonce {
         Some(n) => n,
         None => pool_path
             .as_deref()
             .and_then(|p| pending_nonce_from_pool(p, from))
-            .unwrap_or(ledger_nonce),
+            .unwrap_or(fetch_balance(from, rpc.clone(), token.clone())?.nonce),
     };
     let kind = match req.kind {
         BuildKind::Transfer { to, amount } => TxKind::Transfer {
@@ -974,8 +1004,8 @@ fn verify_external_signer_identity(
     address: &str,
     pubkey_hex: &str,
 ) -> Result<VerifyingKey, PocketError> {
-    let pubkey_bytes =
-        hex::decode(pubkey_hex).map_err(|e| PocketError::Crypto(format!("invalid pubkey hex: {e}")))?;
+    let pubkey_bytes = hex::decode(pubkey_hex)
+        .map_err(|e| PocketError::Crypto(format!("invalid pubkey hex: {e}")))?;
     let pubkey_arr: [u8; 32] = pubkey_bytes
         .as_slice()
         .try_into()
@@ -998,13 +1028,7 @@ pub fn build_and_sign_transfer(
     token: Option<String>,
 ) -> Result<TxEnvelope, PocketError> {
     let info = load_keystore(password)?;
-    let mut tx = build_unsigned_tx(
-        &info.address,
-        &info.public_key_hex,
-        req,
-        rpc,
-        token,
-    )?;
+    let mut tx = build_unsigned_tx(&info.address, &info.public_key_hex, req, rpc, token)?;
     let msg = tx_signing_bytes(&tx)?;
     let seed_bytes = Mnemonic::parse_in_normalized(Language::English, &info.mnemonic)
         .map_err(|e| PocketError::Mnemonic(e.to_string()))?
@@ -1107,6 +1131,42 @@ fn now_ts() -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::io::{Read, Write};
+    use std::net::TcpListener;
+    use std::sync::{Mutex, OnceLock};
+
+    fn env_guard() -> std::sync::MutexGuard<'static, ()> {
+        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+        LOCK.get_or_init(|| Mutex::new(()))
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+    }
+
+    fn free_loopback_addr() -> String {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap().to_string();
+        drop(listener);
+        addr
+    }
+
+    fn http_get(addr: &str, path: &str, auth: Option<&str>) -> String {
+        for _ in 0..20 {
+            if let Ok(mut stream) = std::net::TcpStream::connect(addr) {
+                let mut req =
+                    format!("GET {path} HTTP/1.1\r\nHost: {addr}\r\nConnection: close\r\n");
+                if let Some(token) = auth {
+                    req.push_str(&format!("Authorization: Bearer {token}\r\n"));
+                }
+                req.push_str("\r\n");
+                stream.write_all(req.as_bytes()).unwrap();
+                let mut resp = String::new();
+                stream.read_to_string(&mut resp).unwrap();
+                return resp;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(25));
+        }
+        panic!("unable to connect to test server at {addr}");
+    }
 
     #[test]
     fn signing_bytes_ignore_signature() {
@@ -1171,6 +1231,7 @@ mod tests {
 
     #[test]
     fn profile_payload_hides_attestation_for_payout_route() {
+        let _guard = env_guard();
         let tmp = tempfile::tempdir().unwrap();
         std::env::set_var("HOME", tmp.path());
         save_profile(&Profile {
@@ -1184,8 +1245,81 @@ mod tests {
     }
 
     #[test]
+    fn build_unsigned_tx_uses_supplied_nonce_without_rpc() {
+        let _guard = env_guard();
+        std::env::remove_var(ENV_PENDING_POOL);
+        let tx = build_unsigned_tx(
+            "tpc1wvt60fl2y8cvzfwdf6fvdfhf9qavzn63jpdzqsy7xjvvgvzgthxs9gmanq",
+            "7317a7a7ea21f0c125cd4e92c6a6e9283ac14f51905a20409e3498c430485dcd",
+            TxBuildRequest {
+                kind: BuildKind::Transfer {
+                    to: "tpc1k3avtp53c5r53q8ny295n7806l23t02zcn75cqaf6jmxe4kvxmaqudz4xe".into(),
+                    amount: 7,
+                },
+                fee: 1,
+                nonce: Some(42),
+                timestamp: Some(1700000100),
+                chain_id: Some("peace-testnet".into()),
+                memo: None,
+                pending_pool: None,
+            },
+            None,
+            None,
+        )
+        .expect("explicit nonce should not require live RPC");
+
+        assert_eq!(tx.nonce, 42);
+    }
+
+    #[test]
     fn profile_auth_accepts_matching_bearer() {
         let header = Header::from_bytes(&b"Authorization"[..], &b"Bearer token123"[..]).unwrap();
         assert!(has_profile_auth(&[header], "token123"));
+    }
+
+    #[test]
+    fn non_loopback_profile_bind_requires_token() {
+        let err = serve_profile_http("0.0.0.0:0", None, true).unwrap_err();
+        assert!(err.to_string().contains("non-loopback"));
+    }
+
+    #[test]
+    fn profile_route_is_disabled_without_token() {
+        let _guard = env_guard();
+        let tmp = tempfile::tempdir().unwrap();
+        std::env::set_var("HOME", tmp.path());
+        save_profile(&Profile {
+            payout_address: Some("tpc1payout".into()),
+            attestation_token: Some("secret-token".into()),
+        })
+        .unwrap();
+        let bind = free_loopback_addr();
+        let bind_clone = bind.clone();
+        let handle = std::thread::spawn(move || serve_profile_http(&bind_clone, None, true));
+        let resp = http_get(&bind, "/profile", None);
+        assert!(resp.starts_with("HTTP/1.1 403"));
+        assert!(resp.contains("profile_token_required"));
+        handle.join().unwrap().unwrap();
+    }
+
+    #[test]
+    fn profile_route_returns_secret_with_matching_token() {
+        let _guard = env_guard();
+        let tmp = tempfile::tempdir().unwrap();
+        std::env::set_var("HOME", tmp.path());
+        save_profile(&Profile {
+            payout_address: Some("tpc1payout".into()),
+            attestation_token: Some("secret-token".into()),
+        })
+        .unwrap();
+        let bind = free_loopback_addr();
+        let bind_clone = bind.clone();
+        let handle = std::thread::spawn(move || {
+            serve_profile_http(&bind_clone, Some("token123".into()), true)
+        });
+        let resp = http_get(&bind, "/profile", Some("token123"));
+        assert!(resp.starts_with("HTTP/1.1 200"));
+        assert!(resp.contains("secret-token"));
+        handle.join().unwrap().unwrap();
     }
 }

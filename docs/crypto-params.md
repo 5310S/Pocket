@@ -16,4 +16,5 @@ Notes:
 
 - These parameters are implicit today because Pocket uses `Argon2::default()` in [src/lib.rs](/Users/zip/projects/peace/pocket/src/lib.rs:451).
 - Existing keystores depend on those parameters. Changing them without storing per-keystore KDF metadata would break decryption.
-- The local profile API for Weave/local tooling exposes `/payout` without the attestation token, and `/profile` only when the optional bearer token matches.
+- The local profile API for Weave/local tooling exposes `/payout` without the attestation token, and `/profile` only when a configured bearer token matches.
+- Pocket now refuses non-loopback profile binds unless a profile bearer token is configured.

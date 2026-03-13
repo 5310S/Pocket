@@ -84,7 +84,7 @@ enum Commands {
         /// Bind address for the local profile API
         #[arg(long, default_value = "127.0.0.1:9467")]
         bind: String,
-        /// Optional bearer token required for GET /profile
+        /// Bearer token required for GET /profile; non-loopback binds are rejected without it
         #[arg(long)]
         token: Option<String>,
         /// Serve exactly one request and exit
