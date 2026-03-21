@@ -37,3 +37,20 @@ What changed
 For users
 - Download the installer for your operating system from the Releases page.
 - Each release includes installation instructions in the release notes.
+
+## Quick Start
+
+After installing Pocket:
+- Launch `Pocket` from your desktop applications menu.
+- On Linux, you can also start it from a terminal with `pocket-gui`.
+
+On first launch:
+1. Create a new wallet or restore an existing recovery phrase.
+2. Save the recovery phrase offline before doing anything else.
+3. Save the device password shown by Pocket.
+4. Unlock the wallet and verify the receive address before sending or mining to it.
+
+Linux quick install examples
+- Arch Linux: `sudo pacman -U ./pocket-<version>-1-x86_64.pkg.tar.zst`
+- Ubuntu or Debian: `sudo apt install ./pocket_<version>_linux_amd64.deb`
+- Generic desktop Linux: `chmod +x pocket_<version>_linux_x86_64.AppImage && ./pocket_<version>_linux_x86_64.AppImage`
