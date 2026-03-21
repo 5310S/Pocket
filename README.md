@@ -41,8 +41,8 @@ For users
 ## Quick Start
 
 After installing Pocket:
-- Launch `Pocket` from your desktop applications menu.
-- On Linux, you can also start it from a terminal with `pocket-gui`.
+- On Linux, start it from a terminal with `pocket-gui`.
+- If your desktop environment shows `Pocket` in the applications menu, that launcher works too.
 
 On first launch:
 1. Create a new wallet or restore an existing recovery phrase.
