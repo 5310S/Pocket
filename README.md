@@ -44,6 +44,19 @@ After installing Pocket:
 - On Linux, start it from a terminal with `pocket-gui`.
 - If your desktop environment shows `Pocket` in the applications menu, that launcher works too.
 
+## Current Validation Status
+
+As of March 21, 2026, Pocket has been manually validated on Peace testnet on:
+- Arch Linux
+- macOS
+- Windows
+
+Confirmed behaviors in that validation pass:
+- Pocket launches successfully.
+- Wallets can receive testnet payments.
+- Mining works.
+- Mined payouts arrive in Pocket.
+
 On first launch:
 1. Create a new wallet or restore an existing recovery phrase.
 2. Save the recovery phrase offline before doing anything else.
